@@ -26,8 +26,15 @@ class Images:
 
         for nr, image in enumerate(self.images):
             print(f"looping through {nr + 1} of {len(self.images)} files")
-            augment = Augmentation(image, self.origin_path, self.save_path)
+            augment = Augmentation(image[:-4], self.origin_path, self.save_path)
             augment.flip_images_horizontally()
+
+
+class Img:
+    def __init__(self, name):
+        self.binaries = None
+        self.name = name
+        self.annotations = []
 
 
 class Augmentation:
@@ -35,66 +42,61 @@ class Augmentation:
         self.image_name = image_name
         self.origin_path = origin_path
         self.save_path = save_path
-        self.image_bin = None
-        self.image_flipped_bin = None
-        self.annotation_file_path = ""
-        self.annotation_file_path_flipped = ""
-        self.newly_created_annot_files = []
         self.origin_image_size = 448
         self.final_image_size = 416
 
-    def save_image(self):
+    def save_image(self, name, file, quality):
         pass
         # (1, 100) -> IMWRITE_JPEG_QUALITY 100 (highest)
         # cv2.imwrite(self.origin_path + image_name + NEW_IMAGE_SUFFIX, self.image_flipped, (1, 100))
 
     def flip_images_horizontally(self):
-        self.image_bin = cv2.imread(self.origin_path + self.image_name, flags=-1)
-        self.image_flipped_bin = np.fliplr(self.image_bin)
+        bin_image = Img(self.image_name)
+        bin_image.binaries = cv2.imread(self.origin_path + self.image_name + ".jpg", flags=-1)
+        bin_image_flipped = Img(self.image_name + "_flipped")
+        bin_image_flipped.binaries = np.fliplr(bin_image.binaries)
+        image_binaries = [bin_image, bin_image_flipped]
 
-        self.annotation_file_path = self.origin_path + self.image_name[:-4] + ".txt"
-        self.annotation_file_path_flipped = self.origin_path + self.annotation_file_path[:-4] + "_flipped.txt"
-        self.create_annotation_file()
-        self.translate_images()
+        self.create_annotation_file(bin_image, bin_image_flipped)
+        self.translate_images(image_binaries)
 
-    def create_annotation_file(self):
-        with open(self.annotation_file_path_flipped, mode='w', newline='') as new_annotation_file:
-            with open(self.annotation_file_path, mode='r') as old_annotation_file:
-                reader = csv.reader(old_annotation_file, delimiter=" ")
-                writer = csv.writer(new_annotation_file, delimiter=" ")
-                for row in reader:
-                    shifted_x_value = str(1 - float(row[1]))
-                    new_row = [row[0], shifted_x_value, row[2], row[3], row[4]]
-                    writer.writerow(new_row)
-        self.newly_created_annot_files.append(self.annotation_file_path_flipped)  # collect for later deletion
+    def create_annotation_file(self, bin_image, bin_image_flipped):
+        annotation_file_path = self.origin_path + bin_image.name + ".txt"
+        with open(annotation_file_path, mode='r') as old_annotation_file:
+            reader = csv.reader(old_annotation_file, delimiter=" ")
+            for row in reader:
+                bin_image.annotations.append(row)
+                shifted_x_value = str(1 - float(row[1]))
+                new_row = [row[0], shifted_x_value, row[2], row[3], row[4]]
+                bin_image_flipped.annotations.append(new_row)
 
-    def translate_images(self):
+    def translate_images(self, image_binaries):
         # for nr, file in enumerate(self.files):
-        for _ in range(2):
+        for image in image_binaries:
             # if file.endswith(".jpg"):
             # im = cv2.imread(self.origin_path + file, flags=-1)
             # image_name = file[:-4]
             # self.annotation_file_path = image_name + ".txt"
 
-            translation1 = im[0:416, 0:416, :]  # row, column, depth
-            cv2.imwrite(self.save_path + image_name + "translated1.jpg", translation1, (1, 100))
-            self.redraw_annotations("translated1.txt", upper=True, left=True)
+            translation1 = image.binaries[0:416, 0:416, :]  # row, column, depth
+            cv2.imwrite(self.save_path + image.name + "tr1.jpg", translation1, (1, 100))
+            self.redraw_annotations("tr1.txt", upper=True, left=True)
 
-            translation2 = im[32:448, 0:416, :]
-            cv2.imwrite(self.save_path + image_name + "translated2.jpg", translation2, (1, 100))
-            self.redraw_annotations("translated2.txt", False, True)
+            translation2 = image.binaries[32:448, 0:416, :]
+            cv2.imwrite(self.save_path + image.name + "tr2.jpg", translation2, (1, 100))
+            self.redraw_annotations("tr2.txt", False, True)
 
-            translation3 = im[0:416, 32:448, :]
-            cv2.imwrite(self.save_path + image_name + "translated3.jpg", translation3, (1, 100))
-            self.redraw_annotations("translated3.txt", True, False)
+            translation3 = image.binaries[0:416, 32:448, :]
+            cv2.imwrite(self.save_path + image.name + "tr3.jpg", translation3, (1, 100))
+            self.redraw_annotations("tr3.txt", True, False)
 
-            translation4 = im[32:448, 32:448, :]
-            cv2.imwrite(self.save_path + image_name + "translated4.jpg", translation4, (1, 100))
-            self.redraw_annotations("translated4.txt", False, False)
+            translation4 = image.binaries[32:448, 32:448, :]
+            cv2.imwrite(self.save_path + image.name + "tr4.jpg", translation4, (1, 100))
+            self.redraw_annotations("tr4.txt", False, False)
 
-            translation5 = im[16:432, 16:432, :]
-            cv2.imwrite(self.save_path + image_name + "translated5.jpg", translation5, (1, 100))
-            self.redraw_annotations("translated5.txt", center=True)
+            translation5 = image.binaries[16:432, 16:432, :]
+            cv2.imwrite(self.save_path + image.name + "tr5.jpg", translation5, (1, 100))
+            self.redraw_annotations("tr5.txt", center=True)
 
     def redraw_annotations(self, suffix, upper=False, left=False, center=False):
         with open(self.save_path + self.annotation_file_path[:-4] + suffix, mode='w',
