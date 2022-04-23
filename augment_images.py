@@ -5,9 +5,12 @@ import tkinter as tk
 from tkinter import filedialog
 from tkinter.messagebox import askyesno
 import csv
+import concurrent.futures
 
-# INITDIR = "F:\\RadarProjekt\\Training"
-INITDIR = "C:\\Users\\Fabian\\Documents\\MCSc\\Projekt\\Code\\DataAugmentation"
+# INITDIR = "C:\\Users\\Fabian\\Documents\\MCSc\\Projekt\\Code\\DataAugmentation"
+
+
+INITDIR = "F:\\RadarProjekt\\Training"
 
 
 class Executor:
@@ -22,10 +25,11 @@ class Executor:
             if file.endswith(".jpg"):
                 self.images.append(file)
 
-        for nr, image in enumerate(self.images):
-            print(f"looping through {nr + 1} of {len(self.images)} files")
-            augment = Augmentation(image[:-4], self.origin_path, self.save_path)
-            augment.augment()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=40) as executor:
+            for nr, image in enumerate(self.images):
+                print(f"stuffing {nr + 1} of {len(self.images)} files to thread pool")
+                augment = Augmentation(image[:-4], self.origin_path, self.save_path)
+                executor.submit(augment.augment, nr)
 
 
 class Image:
@@ -52,13 +56,15 @@ class Augmentation:
         # (1, 100) -> IMWRITE_JPEG_QUALITY 100 (highest)
         # cv2.imwrite(self.origin_path + image_name + NEW_IMAGE_SUFFIX, self.image_flipped, (1, 100))
 
-    def augment(self):
+    def augment(self, nr):
+        print(f"{nr} started")
         templates = self.flip_images_horizontally()
         templates = self.translate_images(templates)
         self.increase_brightness(templates)
         self.decrease_brightness(templates)
         self.saturate(templates)
         self.desaturate(templates)
+        print(f"{nr} completed")
 
     def flip_images_horizontally(self):
         bin_image = Image(self.image_name)
