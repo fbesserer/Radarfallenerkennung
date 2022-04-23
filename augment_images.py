@@ -6,11 +6,7 @@ from tkinter import filedialog
 from tkinter.messagebox import askyesno
 import csv
 
-NEW_IMAGE_SUFFIX = "_flipped.jpg"
-# NEW_ANNOTATION_SUFFIX = "_flipped.txt"
 # INITDIR = "F:\\RadarProjekt\\Training"
-
-
 INITDIR = "C:\\Users\\Fabian\\Documents\\MCSc\\Projekt\\Code\\DataAugmentation"
 
 
@@ -29,10 +25,10 @@ class Executor:
         for nr, image in enumerate(self.images):
             print(f"looping through {nr + 1} of {len(self.images)} files")
             augment = Augmentation(image[:-4], self.origin_path, self.save_path)
-            augment.flip_images_horizontally()
+            augment.augment()
 
 
-class Img:
+class Image:
     def __init__(self, name, binaries=None, annotations=None):
         self.binaries = binaries
         self.name = name
@@ -46,23 +42,35 @@ class Augmentation:
         self.save_path = save_path
         self.origin_image_size = 448
         self.final_image_size = 416
+        self.brightness_increase_val = 30
+        self.brightness_decrease_val = -30
+        self.saturate_val = 30
+        self.desaturate_val = -30
 
     def save_image(self, file, name, quality):
         pass
         # (1, 100) -> IMWRITE_JPEG_QUALITY 100 (highest)
         # cv2.imwrite(self.origin_path + image_name + NEW_IMAGE_SUFFIX, self.image_flipped, (1, 100))
 
+    def augment(self):
+        templates = self.flip_images_horizontally()
+        templates = self.translate_images(templates)
+        self.increase_brightness(templates)
+        self.decrease_brightness(templates)
+        self.saturate(templates)
+        self.desaturate(templates)
+
     def flip_images_horizontally(self):
-        bin_image = Img(self.image_name)
+        bin_image = Image(self.image_name)
         bin_image.binaries = cv2.imread(self.origin_path + self.image_name + ".jpg", flags=-1)
-        bin_image_flipped = Img(self.image_name + "_flipped")
+        bin_image_flipped = Image(self.image_name + "_flipped")
         bin_image_flipped.binaries = np.fliplr(bin_image.binaries)
-        image_binaries = [bin_image, bin_image_flipped]
+        images = [bin_image, bin_image_flipped]
 
-        self.create_annotation_file(bin_image, bin_image_flipped)
-        self.translate_images(image_binaries)
+        self.calc_annotation_flipped(bin_image, bin_image_flipped)
+        return images
 
-    def create_annotation_file(self, bin_image, bin_image_flipped):
+    def calc_annotation_flipped(self, bin_image, bin_image_flipped):
         annotation_file_path = self.origin_path + bin_image.name + ".txt"
         with open(annotation_file_path, mode='r') as old_annotation_file:
             reader = csv.reader(old_annotation_file, delimiter=" ")
@@ -72,46 +80,42 @@ class Augmentation:
                 new_row = [row[0], shifted_x_value, row[2], row[3], row[4]]
                 bin_image_flipped.annotations.append(new_row)
 
-    def translate_images(self, image_binaries):
-        image_collection = []
-        for image in image_binaries:
+    def translate_images(self, images):
+        templates = []
+        for image in images:
             translation1 = image.binaries[0:416, 0:416, :]  # row, column, depth
             cv2.imwrite(self.save_path + image.name + "_tr1.jpg", translation1, (1, 100))
-            annotations = self.redraw_annotations(image, upper=True, left=True)
+            annotations = self.calc_annotations_translated(image, upper=True, left=True)
             self.save_txt(annotations, image.name + "_tr1.txt")
-            image_collection.append(Img(image.name + "_tr1", translation1, annotations))
+            templates.append(Image(image.name + "_tr1", translation1, annotations))
 
             translation2 = image.binaries[32:448, 0:416, :]
             cv2.imwrite(self.save_path + image.name + "_tr2.jpg", translation2, (1, 100))
-            annotations = self.redraw_annotations(image, False, True)
+            annotations = self.calc_annotations_translated(image, False, True)
             self.save_txt(annotations, image.name + "_tr2.txt")
-            image_collection.append(Img(image.name + "_tr2", translation2, annotations))
+            templates.append(Image(image.name + "_tr2", translation2, annotations))
 
             translation3 = image.binaries[0:416, 32:448, :]
             cv2.imwrite(self.save_path + image.name + "_tr3.jpg", translation3, (1, 100))
-            annotations = self.redraw_annotations(image, True, False)
+            annotations = self.calc_annotations_translated(image, True, False)
             self.save_txt(annotations, image.name + "_tr3.txt")
-            image_collection.append(Img(image.name + "_tr3", translation3, annotations))
+            templates.append(Image(image.name + "_tr3", translation3, annotations))
 
             translation4 = image.binaries[32:448, 32:448, :]
             cv2.imwrite(self.save_path + image.name + "_tr4.jpg", translation4, (1, 100))
-            annotations = self.redraw_annotations(image, False, False)
+            annotations = self.calc_annotations_translated(image, False, False)
             self.save_txt(annotations, image.name + "_tr4.txt")
-            image_collection.append(Img(image.name + "_tr4", translation4, annotations))
+            templates.append(Image(image.name + "_tr4", translation4, annotations))
 
             translation5 = image.binaries[16:432, 16:432, :]
             cv2.imwrite(self.save_path + image.name + "_tr5.jpg", translation5, (1, 100))
-            annotations = self.redraw_annotations(image, center=True)
+            annotations = self.calc_annotations_translated(image, center=True)
             self.save_txt(annotations, image.name + "_tr5.txt")
-            image_collection.append(Img(image.name + "_tr5", translation5, annotations))
+            templates.append(Image(image.name + "_tr5", translation5, annotations))
 
-    def save_txt(self, annotations, filename):
-        with open(self.save_path + filename, mode='w', newline='') as new_annotation_file:
-            writer = csv.writer(new_annotation_file, delimiter=" ")
-            for row in annotations:
-                writer.writerow(row)
+        return templates
 
-    def redraw_annotations(self, image, upper=False, left=False, center=False):
+    def calc_annotations_translated(self, image, upper=False, left=False, center=False):
         annotations = []
         for row in image.annotations:
             # <object-class> <x_center> <y_center> <width> <height>
@@ -189,6 +193,52 @@ class Augmentation:
                        "{:.6f}".format(width), "{:.6f}".format(height)]
             annotations.append(new_row)
         return annotations
+
+    def save_txt(self, annotations, filename):
+        with open(self.save_path + filename, mode='w', newline='') as new_annotation_file:
+            writer = csv.writer(new_annotation_file, delimiter=" ")
+            for row in annotations:
+                writer.writerow(row)
+
+    def increase_brightness(self, templates):
+        for image in templates:
+            im = image.binaries
+            hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
+            hsv[:, :, 2] = np.where(hsv[:, :, 2] > 255 - self.brightness_increase_val, 255,
+                                    hsv[:, :, 2] + self.brightness_increase_val)
+            im = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+            cv2.imwrite(self.save_path + image.name + "_bi.jpg", im, (1, 100))
+            self.save_txt(image.annotations, image.name + "_bi.txt")
+
+    def decrease_brightness(self, templates):
+        for image in templates:
+            im = image.binaries
+            hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
+            hsv[:, :, 2] = np.where(hsv[:, :, 2] < 0 - self.brightness_decrease_val, 0,
+                                    hsv[:, :, 2] + self.brightness_decrease_val)
+            im = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+            cv2.imwrite(self.save_path + image.name + "_bd.jpg", im, (1, 100))
+            self.save_txt(image.annotations, image.name + "_bd.txt")
+
+    def saturate(self, templates):
+        for image in templates:
+            im = image.binaries
+            hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
+            hsv[:, :, 1] = np.where(hsv[:, :, 1] > 255 - self.saturate_val, 255,
+                                    hsv[:, :, 1] + self.saturate_val)
+            im = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+            cv2.imwrite(self.save_path + image.name + "_sat.jpg", im, (1, 100))
+            self.save_txt(image.annotations, image.name + "_sat.txt")
+
+    def desaturate(self, templates):
+        for image in templates:
+            im = image.binaries
+            hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
+            hsv[:, :, 1] = np.where(hsv[:, :, 1] < 0 - self.desaturate_val, 0,
+                                    hsv[:, :, 1] + self.desaturate_val)
+            im = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+            cv2.imwrite(self.save_path + image.name + "_desat.jpg", im, (1, 100))
+            self.save_txt(image.annotations, image.name + "_desat.txt")
 
 
 def delete_files(path):
