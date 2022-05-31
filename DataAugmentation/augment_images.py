@@ -7,7 +7,7 @@ from tkinter.messagebox import askyesno
 import csv
 import concurrent.futures
 
-# INITDIR = "C:\\Users\\Fabian\\Documents\\MCSc\\Projekt\\Code\\DataAugmentation"
+# INITDIR = "C:\\Users\\Fabian\\Documents\\MCSc\\Projekt\\Code\\Radarfallenerkennung"
 
 
 INITDIR = "F:\\RadarProjekt\\Training"
@@ -27,7 +27,7 @@ class Executor:
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=40) as executor:
             for nr, image in enumerate(self.images):
-                print(f"stuffing {nr + 1} of {len(self.images)} files to thread pool")
+                print(f"feeding {nr + 1} of {len(self.images)} files to thread pool")
                 augment = Augmentation(image[:-4], self.origin_path, self.save_path)
                 executor.submit(augment.augment, nr)
 
