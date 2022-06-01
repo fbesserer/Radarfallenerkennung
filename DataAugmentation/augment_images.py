@@ -11,6 +11,7 @@ import concurrent.futures
 
 
 INITDIR = "F:\\RadarProjekt\\Training"
+DEBUG = False
 
 
 class Executor:
@@ -154,13 +155,13 @@ class Augmentation:
                     if height < 0:
                         continue
                     y_center_new = (0.5 * height) / self.final_image_size
-
-                # print(
-                #     f"{image.name}: "
-                #     f"<{round(x_center_new * self.final_image_size - (width / 2), 1)}> "
-                #     f"<{round(x_center_new * self.final_image_size + (width / 2), 1)}> "
-                #     f"<{round(y_center_new * self.final_image_size - (height / 2), 1)}> "
-                #     f"<{round(y_center_new * self.final_image_size + (height / 2), 1)}>")
+                if DEBUG:
+                    print(
+                        f"{image.name}: "
+                        f"<{round(x_center_new * self.final_image_size - (width / 2), 1)}> "
+                        f"<{round(x_center_new * self.final_image_size + (width / 2), 1)}> "
+                        f"<{round(y_center_new * self.final_image_size - (height / 2), 1)}> "
+                        f"<{round(y_center_new * self.final_image_size + (height / 2), 1)}>")
             else:
                 if left:
                     x_center_new = x_center / self.final_image_size
@@ -249,7 +250,7 @@ class Augmentation:
 
 def delete_files(path):
     delstr = "_flipped"
-    confirm = askyesno("Warning", f"Do you want to delete all files in path {path} with \"{delstr}\" in their name?")
+    confirm = askyesno("Warning", f"Do you want to delete all files in path {path} containing \"{delstr}\"?")
     if confirm:
         files = os.listdir(path)
         for file in files:
@@ -258,10 +259,10 @@ def delete_files(path):
 
 
 if __name__ == "__main__":
-    original_path = tk.filedialog.askdirectory(initialdir=INITDIR, title="Ordner mit Bildern auswählen")
+    original_path = tk.filedialog.askdirectory(initialdir=INITDIR, title="Choose source folder of images")
     original_path += "\\"
     save_path = tk.filedialog.askdirectory(initialdir=INITDIR,
-                                           title="Ordner auswählen, an dem augmentierte Bilder gespeichert werden sollen")
+                                           title="Choose save folder for augmented images")
     save_path += "\\"
     # delete_files(original_path)
     aug = Executor(original_path, save_path)

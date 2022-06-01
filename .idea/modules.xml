@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/DataAugmentation.iml" filepath="$PROJECT_DIR$/.idea/DataAugmentation.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/Radarfallenerkennung.iml" filepath="$PROJECT_DIR$/.idea/Radarfallenerkennung.iml" />
     </modules>
   </component>
 </project>
