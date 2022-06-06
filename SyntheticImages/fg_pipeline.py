@@ -1,13 +1,11 @@
-import queue
 import random
 from collections import namedtuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from queue import Queue
 import tkinter as tk
 from tkinter import filedialog
-from tkinter.messagebox import askyesno
 import os
-from typing import List, Tuple, Union, Any, Optional, Iterable
+from typing import List, Tuple, Union, Any, Optional, Iterable, Dict
 
 import numpy as np
 import cv2
@@ -15,6 +13,7 @@ import cv2
 INITDIR = "F:\\RadarProjekt\\Synthetische Bilder\\freigestellte Blitzer"
 PIXELS = 416
 MIN_HEIGHT = 20
+DEBUG = False
 
 
 @dataclass
@@ -24,21 +23,15 @@ class Foreground:
     annot_class: int  # 0 == distractor object
     binaries: np.ndarray
     bounding_box: Optional[Tuple[float, ...]] = None
-    # def __init__(self, name: str, annot_class: int = 0, binaries: np.ndarray = None,
-    #              bounding_box: Optional[Tuple[float, ...]] = None) -> None:
-    #     # annot_class = 0 for distractor objects
-    #     self.name = name
-    #     self.annot_class = annot_class
-    #     self.binaries = binaries
-    #     self.bounding_box = () if bounding_box is None else bounding_box
-    #     # bounding box x,y werte müssen später noch je nachdem wo im bild platziert angepasst werden (tatsächliche position + x/y)
+    logging_info: namedtuple = namedtuple("logging_info", ["augmentation_type", "value"])
 
 
 class FGExecutor:
     def __init__(self, source_path: str) -> None:
         self.source_path = source_path
-        self.source_images: Queue = Queue()
-        self.prepared_images: Queue = Queue()
+        self.source_images: Queue[str] = Queue()
+        self.prepared_images: Queue[Foreground] = Queue()
+        self.logging_stats: Dict = {"saturation": 0, "brightness": 0}
         self.load_images()
 
     def load_images(self) -> None:
@@ -50,9 +43,19 @@ class FGExecutor:
     def execute(self) -> None:
         while not self.source_images.empty():
             FGPreparation(self.source_images.get(), source_path, self)
+        if DEBUG:
+            temp_queue = Queue()
+            while not self.prepared_images.empty():
+                img = self.prepared_images.get()
+                temp_queue.put(img)
+                cv2.imwrite(self.source_path + img.name + ".png", img.binaries)
+            self.prepared_images = temp_queue
+            print(self.prepared_images)
 
 
 class FGPreparation:
+    """scale and augment foreground and distractor objects"""
+
     def __init__(self, image_name: str, source_path: str, fgexecutor: FGExecutor):
         self.image_name = image_name
         self.source_path = source_path
@@ -63,14 +66,12 @@ class FGPreparation:
     def prepare(self) -> None:
         self.determine_annot_class()
         image: np.ndarray = cv2.imread(self.source_path + self.image_name + ".png", cv2.IMREAD_UNCHANGED)
-        # templates erstellen
         templates: List[Foreground] = self.scale_image(image)
-        # templates augmentieren
         self.augment_images(templates)
-        # fertige templates in die prepared images schlange einreihen
-        # self.fgexecutor.prepared_images.put(foreground)
+        for template in templates:
+            self.fgexecutor.prepared_images.put(template)
 
-    def determine_annot_class(self):
+    def determine_annot_class(self) -> None:
         if "Kat1" in self.image_name:
             self.annot_class = 1
         elif "Kat2" in self.image_name:
@@ -81,13 +82,11 @@ class FGPreparation:
             self.annot_class = 5
 
     def scale_image(self, image: np.ndarray) -> List[Foreground]:
-        # um 25% kleiner machen bis eine Schwelle von MIN_HEIGHT Pixel erreicht ist
+        """decrease by 25% until threshold of MIN_HEIGHT pixel is reached"""
         foregrounds: List[Foreground] = []
         Imagesize: namedtuple = namedtuple("Imagesize", ["height", "width"])
         imagesize = Imagesize(image.shape[0], image.shape[1])
 
-        # boundingbox = (imagesize.height / 2, imagesize.width / 2, imagesize.height / PIXELS, imagesize.width / PIXELS)
-        # foregrounds.append(Foreground(self.image_name + "_original", self.annot_class, image, boundingbox))
         suffix = 1
         while imagesize.height > MIN_HEIGHT and imagesize.width > MIN_HEIGHT // 2:
             boundingbox = (
@@ -103,27 +102,34 @@ class FGPreparation:
         for image in templates:
             i: int = random.randint(0, 2)
             # 0 == no augmentation
-            if i == 1:
-                self.change_brightness(image)
-            elif i == 2:
-                self.change_saturation(image)
+            if i > 0:
+                # 1 == saturation, 2 == brightness
+                self.do_augment(image, i)
 
-    def change_brightness(self, image: Foreground):
-        values = [30, -30]
-        im = image.binaries
-        value = values[random.randint(0, 1)]
-        # todo: 4. dimension speichern und nachher wieder anfügen
-        hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
+    def do_augment(self, image: Foreground, type: int) -> None:
+        """ in/decrease saturation or brightness
+        type 1 == saturation, 2 == brightness"""
+        values: List[int] = [30, -30]
+        im: np.ndarray = image.binaries
+        value: int = values[random.randint(0, 1)]
+        alpha: np.ndarray = image.binaries[:, :, 3]
+        hsv: np.ndarray = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
         if value > 0:
-            hsv[:, :, 2] = np.where(hsv[:, :, 2] > 255 - value, 255,
-                                    hsv[:, :, 2] + value)
+            hsv[:, :, type] = np.where(hsv[:, :, type] > 255 - value, 255,
+                                       hsv[:, :, type] + value)
         else:
-            hsv[:, :, 2] = np.where(hsv[:, :, 2] < 0 - value, 0,
-                                    hsv[:, :, 2] + value)
-        image.binaries = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+            hsv[:, :, type] = np.where(hsv[:, :, type] < 0 - value, 0,
+                                       hsv[:, :, type] + value)
+        bgr: np.ndarray = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        combined: np.ndarray = np.dstack((bgr, alpha))
+        image.binaries = combined
 
-    def change_saturation(self, image: Foreground):
-        pass
+        image.logging_info.augmentation_type = "saturation" if type == 1 else "brightness"
+        image.logging_info.value = value
+        if type == 1:
+            self.fgexecutor.logging_stats["saturation"] += 1
+        else:
+            self.fgexecutor.logging_stats["brightness"] += 1
 
 
 if __name__ == "__main__":
@@ -134,6 +140,3 @@ if __name__ == "__main__":
     save_path += "\\"
     if source_path != "\\" and save_path != "\\":
         FGExecutor(source_path).execute()
-        # FGExecutor.execute(FGExecutor(source_path))
-        # ex = FGExecutor(source_path)
-        # ex.execute()

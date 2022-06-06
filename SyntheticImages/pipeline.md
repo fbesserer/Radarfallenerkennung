@@ -3,7 +3,7 @@
 - aus diesen wird die benötigte Anzahl an Bildern (+ weitere Pufferbilder) zufällig ausgewählt,
 - in queue gespeichert und bei bedarf geladen
 
-### 2. random erase in backgrounds einfügen, so dass die bereits existierende bounding box nicht berührt wird
+### 2. random erase in backgrounds einfügen, so dass die bereits existierende bounding box maximal zu 75 % überlagert wird (occlusion)
 
 - falls nicht möglich, bild discarden und eines der pufferbilder laden [edge case]
 - Bildebearbeitung kann parallel erfolgen. Bei Speicherung der fertigen Bilder muss synchronisiert werden
