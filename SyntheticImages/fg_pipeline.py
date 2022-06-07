@@ -12,7 +12,7 @@ import cv2
 
 INITDIR = "F:\\RadarProjekt\\Synthetische Bilder\\freigestellte Blitzer"
 PIXELS = 416
-MIN_HEIGHT = 20
+MIN_HEIGHT = 11
 DEBUG = False
 
 
@@ -30,7 +30,8 @@ class FGExecutor:
     def __init__(self, source_path: str) -> None:
         self.source_path = source_path
         self.source_images: Queue[str] = Queue()
-        self.prepared_images: Queue[Foreground] = Queue()
+        self.prepared_foreground: Queue[Foreground] = Queue()
+        self.distractor_objects: List[Foreground] = []
         self.logging_stats: Dict = {"saturation": 0, "brightness": 0}
         self.load_images()
 
@@ -40,17 +41,18 @@ class FGExecutor:
             if file.endswith(".png"):
                 self.source_images.put(file[:-4])
 
-    def execute(self) -> None:
+    def execute(self) -> Tuple[Queue, List[Foreground]]:
         while not self.source_images.empty():
-            FGPreparation(self.source_images.get(), source_path, self)
+            FGPreparation(self.source_images.get(), self.source_path, self)
         if DEBUG:
             temp_queue = Queue()
-            while not self.prepared_images.empty():
-                img = self.prepared_images.get()
+            while not self.prepared_foreground.empty():
+                img = self.prepared_foreground.get()
                 temp_queue.put(img)
                 cv2.imwrite(self.source_path + img.name + ".png", img.binaries)
-            self.prepared_images = temp_queue
-            print(self.prepared_images)
+            self.prepared_foreground = temp_queue
+            print(self.prepared_foreground.unfinished_tasks)
+        return self.prepared_foreground, self.distractor_objects
 
 
 class FGPreparation:
@@ -69,7 +71,10 @@ class FGPreparation:
         templates: List[Foreground] = self.scale_image(image)
         self.augment_images(templates)
         for template in templates:
-            self.fgexecutor.prepared_images.put(template)
+            if template.annot_class == 0:
+                self.fgexecutor.distractor_objects.append(template)
+            else:
+                self.fgexecutor.prepared_foreground.put(template)
 
     def determine_annot_class(self) -> None:
         if "Kat1" in self.image_name:
@@ -82,18 +87,21 @@ class FGPreparation:
             self.annot_class = 5
 
     def scale_image(self, image: np.ndarray) -> List[Foreground]:
-        """decrease by 25% until threshold of MIN_HEIGHT pixel is reached"""
+        """decrease by 5% until threshold of MIN_HEIGHT pixel is reached"""
         foregrounds: List[Foreground] = []
         Imagesize: namedtuple = namedtuple("Imagesize", ["height", "width"])
         imagesize = Imagesize(image.shape[0], image.shape[1])
 
         suffix = 1
-        while imagesize.height > MIN_HEIGHT and imagesize.width > MIN_HEIGHT // 2:
+        while imagesize.height > MIN_HEIGHT and imagesize.width > MIN_HEIGHT:
+            if suffix > 1000:
+                print(f"check scaling ratio at picture {self.image_name}. Over 1000 iterations")
+                break
             boundingbox = (
                 imagesize.height / 2, imagesize.width / 2, imagesize.height / PIXELS, imagesize.width / PIXELS)
             foregrounds.append(Foreground(self.image_name + "_" + str(suffix), self.annot_class, image, boundingbox))
 
-            imagesize = Imagesize(int(imagesize.height * 0.75), int(imagesize.width * 0.75))
+            imagesize = Imagesize(int(round(imagesize.height * 0.95)), int(round(imagesize.width * 0.95)))
             image = cv2.resize(image, (imagesize.width, imagesize.height), interpolation=cv2.INTER_AREA)
             suffix += 1
         return foregrounds

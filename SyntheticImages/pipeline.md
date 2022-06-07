@@ -1,4 +1,4 @@
-### 1. Trainingsbilder als background Bilder hernehmen (44000 Stück)
+### 1. Trainingsbilder als background Bilder nutzen (44000 Stück)
 
 - aus diesen wird die benötigte Anzahl an Bildern (+ weitere Pufferbilder) zufällig ausgewählt,
 - in queue gespeichert und bei bedarf geladen
@@ -18,7 +18,7 @@
 
 - (3 x mit unterchiedlichem Blending), dabei in 20% der
   Fälle Occlusion/Truncationprovozieren (Truncation: >= 25% der Box im Bild,
-  Occlusion: max IOU 75%), in 50% der Bilder Distractor Objects einfügen, Ergebnisse
+  Occlusion: max IOU 75%), in 50% der Bilder Distractor Objects einfügen (die nichts verdecken), Ergebnisse
   loggen und statistisch asuwerten kompletten vorgang mitloggen, so dass im nachhinein
   nachvollzogen werden kann, für welches Bild welche Entscheidungen getroffen wurden.
 
