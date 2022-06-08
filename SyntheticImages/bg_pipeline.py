@@ -12,8 +12,8 @@ from typing import List, Tuple, Union, Any, Optional, Iterable, Dict
 import numpy as np
 import cv2
 
-INITDIR = "F:\\RadarProjekt\\Training\\Training"
-# INITDIR = "F:\\RadarProjekt\\Synthetische Bilder\\backgrounds"
+# INITDIR = "F:\\RadarProjekt\\Training\\Training"
+INITDIR = "F:\\RadarProjekt\\Synthetische Bilder\\backgrounds"
 DEBUG = False
 PIXELS = 416
 NR_TOTAL_IMAGES = 10
@@ -95,11 +95,11 @@ class BGPreparation:
     def random_erase(self, image):
         while True:
             size = random.randint(30, 40)
-            position_x = random.randint(0, 356)
-            position_y = random.randint(0, 356)
-            rgb = np.dstack((np.random.randint(0, 255, (size, size * 2)),
-                             np.random.randint(0, 255, (size, size * 2)),
-                             np.random.randint(0, 255, (size, size * 2))))
+            position_x = random.randint(0, 415 - size)
+            position_y = random.randint(0, 415 - size * 2)
+            rgb = np.dstack((np.random.randint(0, 256, (size, size * 2)),
+                             np.random.randint(0, 256, (size, size * 2)),
+                             np.random.randint(0, 256, (size, size * 2))))
             if self.intersection_over_union(image, position_x, position_y, size) < 0.75:  # max 75% overlap
                 image.binaries[position_x:position_x + size, position_y:position_y + size * 2, :] = rgb
                 break

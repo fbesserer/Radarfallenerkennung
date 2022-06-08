@@ -135,10 +135,7 @@ class ImageCombinator:
             y2 = min(erase_y2, bbox.y2)
 
             intersection_area = max(0, x2 - x1 + 1) * max(0, y2 - y1 + 1)
-            # erase_area = (erase_x2 - erase_x1 + 1) * (erase_y2 - erase_y1 + 1)
             bbox_area = (bbox.x2 - bbox.x1 + 1) * (bbox.y2 - bbox.y1 + 1)
-            # iou = intersection_area / (erase_area + bbox_area - intersection_area)
-            # max_overlap = iou if iou > max_overlap else max_overlap
 
             overlap = intersection_area / bbox_area
             max_overlap = overlap if overlap > max_overlap else max_overlap

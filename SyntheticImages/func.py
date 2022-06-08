@@ -1,3 +1,4 @@
+# nicht dasselbe wie overlap method!
 def intersection_over_union(self, image: Background, position_x: int, position_y: int, size: int) -> float:
     # calculate iou for all potential bboxes and the random_erase box
     max_overlap: float = 0

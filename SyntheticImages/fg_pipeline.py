@@ -22,7 +22,7 @@ class Foreground:
     name: str
     annot_class: int  # 0 == distractor object
     binaries: np.ndarray
-    bounding_box: Optional[Tuple[float, ...]] = None
+    # bounding_box: Optional[Tuple[float, ...]] = None
     logging_info: namedtuple = namedtuple("logging_info", ["augmentation_type", "value"])
 
 
@@ -78,13 +78,13 @@ class FGPreparation:
 
     def determine_annot_class(self) -> None:
         if "Kat1" in self.image_name:
-            self.annot_class = 1
+            self.annot_class = 0
         elif "Kat2" in self.image_name:
-            self.annot_class = 2
+            self.annot_class = 1
         elif "Kat3" in self.image_name:
-            self.annot_class = 3
+            self.annot_class = 2
         elif "Kat5" in self.image_name:
-            self.annot_class = 5
+            self.annot_class = 3
 
     def scale_image(self, image: np.ndarray) -> List[Foreground]:
         """decrease by 5% until threshold of MIN_HEIGHT pixel is reached"""
@@ -97,9 +97,9 @@ class FGPreparation:
             if suffix > 1000:
                 print(f"check scaling ratio at picture {self.image_name}. Over 1000 iterations")
                 break
-            boundingbox = (
-                imagesize.height / 2, imagesize.width / 2, imagesize.height / PIXELS, imagesize.width / PIXELS)
-            foregrounds.append(Foreground(self.image_name + "_" + str(suffix), self.annot_class, image, boundingbox))
+            # boundingbox = (
+            #     imagesize.height / 2, imagesize.width / 2, imagesize.height / PIXELS, imagesize.width / PIXELS)
+            foregrounds.append(Foreground(self.image_name + "_" + str(suffix), self.annot_class, image))
 
             imagesize = Imagesize(int(round(imagesize.height * 0.95)), int(round(imagesize.width * 0.95)))
             image = cv2.resize(image, (imagesize.width, imagesize.height), interpolation=cv2.INTER_AREA)
