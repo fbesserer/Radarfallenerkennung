@@ -41,6 +41,7 @@ class Executor:
             ImageCombinator(self.foregrounds.get(), self.backgrounds.get(), self.save_path,
                             self.distractor_objects).fuse_images()
             print(self.foregrounds.unfinished_tasks)
+            print(self.backgrounds.unfinished_tasks)
 
 
 class ImageCombinator:
@@ -57,23 +58,31 @@ class ImageCombinator:
         # position zufällig auswählen, sodass foreground objekt rein passt
         if np.random.randint(0, 10) < 2:
             # self.fuse_truncated()
-            self.fuse()
+            combined_images = self.fuse()
         else:
-            combined_image = self.fuse()
+            combined_images = self.fuse()
         # 50% der Fälle random element aus distractor liste rausholen -> distractor müssen bei allen 3 bildern eingefügt werden
+        if np.random.randint(0, 10) < 5:
+            self.add_distractor_object(combined_images)
+
+        for image in combined_images:
+            # save and create annotation files etc
+            pass
 
     def fuse_truncated(self):
         pass
 
     def fuse(self) -> List[CombinedImage]:
         # todo: break einbauen, falls ein fg mal tatsächlich nicht eingefügt werden kann?
+        images: List[CombinedImage] = []
         while True:
-            fgsize = ForegroundSize(self.foreground.binaries.shape[0], self.foreground.binaries.shape[1])
-            fg_position_x_in_bg = np.random.randint(0, PIXELS - fgsize.width)
-            fg_position_y_in_bg = np.random.randint(0, PIXELS - fgsize.height)
+            fgsize: ForegroundSize = ForegroundSize(self.foreground.binaries.shape[0],
+                                                    self.foreground.binaries.shape[1])
+            fg_position_x_in_bg: int = np.random.randint(0, PIXELS - fgsize.width)
+            fg_position_y_in_bg: int = np.random.randint(0, PIXELS - fgsize.height)
             # max 75% overlap
             if self.overlap(self.background, fg_position_x_in_bg, fg_position_y_in_bg, fgsize) < 0.75:
-                # fusing auf 3 arten
+                # 3 different fusing strategies are individually applied
                 noblur: CombinedImage = self.no_blur(fg_position_x_in_bg, fg_position_y_in_bg)
                 self.add_annotations(noblur, fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
                 self.add_bboxes(noblur, fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
@@ -81,22 +90,57 @@ class ImageCombinator:
                 cv2.imwrite(self.save_path + noblur.name + ".jpg", noblur.binaries)
                 self.save_annotation_file(noblur.annotations, noblur.name)
 
-                # gauss: CombinedImage = self.gaussian(fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
-                # poiss: CombinedImage = self.poisson(fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
+                gauss: CombinedImage = self.gaussian(fg_position_x_in_bg, fg_position_y_in_bg)
+                self.add_annotations(gauss, fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
+                self.add_bboxes(gauss, fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
+                gauss.binaries = cv2.cvtColor(gauss.binaries, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(self.save_path + gauss.name + ".jpg", gauss.binaries)
+                self.save_annotation_file(gauss.annotations, gauss.name)
+
+                poiss: CombinedImage = self.poisson(fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
+                self.add_annotations(poiss, fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
+                self.add_bboxes(poiss, fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
+                poiss.binaries = cv2.cvtColor(poiss.binaries, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(self.save_path + poiss.name + ".jpg", poiss.binaries)
+                self.save_annotation_file(poiss.annotations, poiss.name)
+
+                images.extend([noblur, gauss, poiss])
                 break
+        return images
 
     def no_blur(self, fg_position_x_in_bg: int, fg_position_y_in_bg: int) -> CombinedImage:
-        mask = self.foreground.binaries[:, :, 3]  # alpha Kanal
-        mask = Image.fromarray(mask)
+        mask: Image = Image.fromarray(self.foreground.binaries[:, :, 3])  # alpha Kanal
+
         # cv2 default is BGR --> conversion to RGB(A) for PIL
-        bg = cv2.cvtColor(self.background.binaries, cv2.COLOR_BGR2RGB)
-        fg = cv2.cvtColor(self.foreground.binaries, cv2.COLOR_BGRA2RGBA)
-        bg = Image.fromarray(bg)
-        fg = Image.fromarray(fg)
+        bg: Image = Image.fromarray(cv2.cvtColor(self.background.binaries, cv2.COLOR_BGR2RGB))
+        fg: Image = Image.fromarray(cv2.cvtColor(self.foreground.binaries, cv2.COLOR_BGRA2RGBA))
+
         bg.paste(fg, box=(fg_position_x_in_bg, fg_position_y_in_bg), mask=mask)
-        # bg.save("F:\\RadarProjekt\\Synthetische Bilder\\freigestellte Blitzer\\BlitzertestPILnoblur.jpg")
-        bg = np.array(bg)
-        return CombinedImage(self.background.name + self.foreground.name + "_noblur", bg)
+
+        return CombinedImage(self.background.name + self.foreground.name + "_noblur", np.array(bg))
+
+    def gaussian(self, fg_position_x_in_bg, fg_position_y_in_bg) -> CombinedImage:
+        mask_gauss: np.ndarray = cv2.GaussianBlur(self.foreground.binaries[:, :, 3], (5, 5), 2)  # alpha Kanal
+        mask: Image = Image.fromarray(mask_gauss)
+
+        # cv2 default is BGR --> conversion to RGB(A) for PIL
+        bg: Image = Image.fromarray(cv2.cvtColor(self.background.binaries, cv2.COLOR_BGR2RGB))
+        fg: Image = Image.fromarray(cv2.cvtColor(self.foreground.binaries, cv2.COLOR_BGRA2RGBA))
+        bg.paste(fg, box=(fg_position_x_in_bg, fg_position_y_in_bg), mask=mask)
+
+        return CombinedImage(self.background.name + self.foreground.name + "_gauss", np.array(bg))
+
+    def poisson(self, fg_position_x_in_bg, fg_position_y_in_bg, fgsize) -> CombinedImage:
+        # completely white mask keeps more details in foreground
+        mask_poisson: np.ndarray = np.full((self.foreground.binaries.shape[0], self.foreground.binaries.shape[1]),
+                                           255).astype("uint8")
+        fg: np.ndarray = cv2.cvtColor(self.foreground.binaries[:, :, 0:3], cv2.COLOR_BGR2RGB)
+        bg: np.ndarray = cv2.cvtColor(self.background.binaries, cv2.COLOR_BGR2RGB)
+
+        center: tuple = (fg_position_x_in_bg + fgsize.width // 2, fg_position_y_in_bg + fgsize.height // 2)
+        new: np.ndarray = cv2.seamlessClone(fg, bg, mask_poisson, center,
+                                            cv2.NORMAL_CLONE)
+        return CombinedImage(self.background.name + self.foreground.name + "_poisson", new)
 
     def add_annotations(self, comb_image: CombinedImage, fg_position_x_in_bg: int, fg_position_y_in_bg: int,
                         fgsize: ForegroundSize) -> None:
@@ -121,6 +165,29 @@ class ImageCombinator:
             bounding_box(fg_position_x_in_bg, fg_position_x_in_bg + fgsize.width, fg_position_y_in_bg,
                          fg_position_y_in_bg + fgsize.height))
 
+    def add_distractor_object(self, combined_images: List[CombinedImage]) -> None:
+        distractor: Foreground = self.distractor_objects[np.random.randint(0, len(self.distractor_objects))]
+        distractor_image = distractor.binaries.copy()
+        assert distractor_image is not distractor.binaries
+        tries: int = 0
+        while True:
+            tries += 1
+            fgsize: ForegroundSize = ForegroundSize(distractor_image.shape[0], distractor_image.shape[1])
+            fg_position_x_in_bg: int = np.random.randint(0, PIXELS - fgsize.width)
+            fg_position_y_in_bg: int = np.random.randint(0, PIXELS - fgsize.height)
+            # no overlap
+            if self.overlap(self.background, fg_position_x_in_bg, fg_position_y_in_bg, fgsize) == 0:
+                noblur, gauss, poisson = combined_images
+                # todo: alle blur... methods und annot/bbox methods umschreiben, sodass auch diese methode damit angepasst werden
+                break
+            elif tries >= 10:
+                # distractor rescalen
+                tries = 0
+                fgsize = ForegroundSize(int(round(distractor_image.height * 0.9)),
+                                        int(round(distractor_image.width * 0.9)))
+                distractor_image = cv2.resize(distractor_image, (fgsize.width, fgsize.height),
+                                              interpolation=cv2.INTER_AREA)
+
     def overlap(self, image: Background, position_x: int, position_y: int, size: ForegroundSize) -> float:
         # calculate overlap for all potential bboxes
         max_overlap: float = 0
@@ -142,9 +209,9 @@ class ImageCombinator:
 
         return max_overlap
 
-    def save_annotation_file(self, annotations, filename):
+    def save_annotation_file(self, annotations, filename) -> None:
         with open(self.save_path + filename + ".txt", mode='w', newline='') as new_annotation_file:
-            writer = csv.writer(new_annotation_file, delimiter=" ")
+            writer: csv.writer = csv.writer(new_annotation_file, delimiter=" ")
             for row in annotations:
                 writer.writerow(row)
 

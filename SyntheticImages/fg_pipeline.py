@@ -20,7 +20,7 @@ DEBUG = False
 class Foreground:
     """class for foreground and distractor objects"""
     name: str
-    annot_class: int  # 0 == distractor object
+    annot_class: int  # -1 == distractor object
     binaries: np.ndarray
     # bounding_box: Optional[Tuple[float, ...]] = None
     logging_info: namedtuple = namedtuple("logging_info", ["augmentation_type", "value"])
@@ -62,7 +62,7 @@ class FGPreparation:
         self.image_name = image_name
         self.source_path = source_path
         self.fgexecutor = fgexecutor
-        self.annot_class: int = 0
+        self.annot_class: int = -1
         self.prepare()
 
     def prepare(self) -> None:
@@ -71,7 +71,7 @@ class FGPreparation:
         templates: List[Foreground] = self.scale_image(image)
         self.augment_images(templates)
         for template in templates:
-            if template.annot_class == 0:
+            if template.annot_class == -1:
                 self.fgexecutor.distractor_objects.append(template)
             else:
                 self.fgexecutor.prepared_foreground.put(template)
@@ -96,6 +96,7 @@ class FGPreparation:
         while imagesize.height > MIN_HEIGHT and imagesize.width > MIN_HEIGHT:
             if suffix > 1000:
                 print(f"check scaling ratio at picture {self.image_name}. Over 1000 iterations")
+                foregrounds.clear()
                 break
             # boundingbox = (
             #     imagesize.height / 2, imagesize.width / 2, imagesize.height / PIXELS, imagesize.width / PIXELS)

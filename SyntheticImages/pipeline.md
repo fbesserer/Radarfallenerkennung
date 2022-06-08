@@ -1,4 +1,4 @@
-### 1. Trainingsbilder als background Bilder nutzen (44000 Stück)
+### 1. Trainingsbilder als background Bilder nutzen (ca. 20000 Stück)
 
 - aus diesen wird die benötigte Anzahl an Bildern (+ weitere Pufferbilder) zufällig ausgewählt,
 - in queue gespeichert und bei bedarf geladen
