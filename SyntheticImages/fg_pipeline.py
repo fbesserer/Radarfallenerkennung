@@ -98,13 +98,14 @@ class FGPreparation:
                 print(f"check scaling ratio at picture {self.image_name}. Over 1000 iterations")
                 foregrounds.clear()
                 break
-            # boundingbox = (
-            #     imagesize.height / 2, imagesize.width / 2, imagesize.height / PIXELS, imagesize.width / PIXELS)
-            foregrounds.append(Foreground(self.image_name + "_" + str(suffix), self.annot_class, image))
+            for i in range(5):  # Anzahl vervielfachen
+                foregrounds.append(
+                    Foreground(self.image_name + "_" + str(suffix) + "_" + str(i), self.annot_class, image))
 
             imagesize = Imagesize(int(round(imagesize.height * 0.95)), int(round(imagesize.width * 0.95)))
             image = cv2.resize(image, (imagesize.width, imagesize.height), interpolation=cv2.INTER_AREA)
             suffix += 1
+
         return foregrounds
 
     def augment_images(self, templates: List[Foreground]) -> None:
