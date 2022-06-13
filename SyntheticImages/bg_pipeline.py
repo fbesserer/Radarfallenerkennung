@@ -16,7 +16,7 @@ import cv2
 INITDIR = "F:\\RadarProjekt\\Synthetische Bilder\\backgrounds"
 DEBUG = False
 PIXELS = 416
-NR_TOTAL_IMAGES = 10
+NR_TOTAL_IMAGES = 100
 
 bounding_box: namedtuple = namedtuple("bounding_box", ["x1", "x2", "y1", "y2"])
 
