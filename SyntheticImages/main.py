@@ -1,4 +1,5 @@
 import csv
+import math
 from collections import namedtuple
 from queue import Queue
 import tkinter as tk
@@ -53,32 +54,53 @@ class ImageCombinator:
         self.save_path = save_path
 
     def fuse_images(self) -> None:
-        if np.random.randint(0, 10) < 2:
-            # self.fuse_truncated()
-            combined_images = self.fuse()
-        else:
-            combined_images = self.fuse()
+        # if np.random.randint(0, 10) < 2:
+        #     self.truncate_foreground()
+        combined_images = self.combine_fg_with_bg()
         # insert distractor in 50% of all cases
         if np.random.randint(0, 10) < 5:
             self.add_distractor_object(combined_images)
 
         for image in combined_images:
             # save images and create annotation files
-            img = cv2.cvtColor(image.binaries, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(self.save_path + image.name + ".jpg", img)
+            cv2.imwrite(self.save_path + image.name + ".jpg", image.binaries)
             self.save_annotation_file(image.annotations, image.name)
 
-    def fuse_truncated(self):
-        pass
+    def truncate_foreground(self) -> None:
+        # rectangle size: a, b
+        x_axis: int = self.foreground.binaries.shape[1]
+        y_axis: int = self.foreground.binaries.shape[0]
+        min_area: int = int(round((y_axis * x_axis) / 2, 0))  # 50% of area
+        x1: int = np.random.randint(0, x_axis / 2)
+        a: int = x_axis - x1
+        y_min: int = int(round(min_area / a, 0))
+        y1: int = np.random.randint(0, y_axis - y_min + 1)
+        b: int = y_axis - y1
 
-    def fuse(self) -> List[CombinedImage]:
+        assert a * b >= min_area
+
+        x2: int = np.random.randint(math.ceil(min_area / b) + x1, x_axis + 1)
+        a = x2 - x1
+        y2 = np.random.randint(math.ceil(min_area / a) + y1, y_axis + 1)
+        b = y2 - y1
+
+        assert a * b >= min_area
+
+        self.foreground.binaries = self.foreground.binaries[y1:y2, x1:x2]
+
+    def combine_fg_with_bg(self, truncate: bool = False) -> List[CombinedImage]:
         # todo: break einbauen, falls ein fg mal tatsächlich nicht eingefügt werden kann?
         images: List[CombinedImage] = []
         while True:
             fgsize: ForegroundSize = ForegroundSize(self.foreground.binaries.shape[0],
                                                     self.foreground.binaries.shape[1])
-            fg_position_x_in_bg: int = np.random.randint(0, PIXELS - fgsize.width)
-            fg_position_y_in_bg: int = np.random.randint(0, PIXELS - fgsize.height)
+            if truncate:  # todo: implement truncate functionality
+                fg_position_x_in_bg: int = 0
+                fg_position_y_in_bg: int = 0
+
+            else:
+                fg_position_x_in_bg: int = np.random.randint(0, PIXELS - fgsize.width)
+                fg_position_y_in_bg: int = np.random.randint(0, PIXELS - fgsize.height)
 
             # max 75% overlap
             if self.overlap(self.background, fg_position_x_in_bg, fg_position_y_in_bg, fgsize) < 0.75:
@@ -87,22 +109,16 @@ class ImageCombinator:
                 self.combine_annotations(noblur, fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
                 self.combine_bboxes(noblur, fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
                 noblur.binaries = cv2.cvtColor(noblur.binaries, cv2.COLOR_RGB2BGR)
-                # cv2.imwrite(self.save_path + noblur.name + ".jpg", noblur.binaries)
-                # self.save_annotation_file(noblur.annotations, noblur.name)
 
                 gauss: CombinedImage = self.gaussian(fg_position_x_in_bg, fg_position_y_in_bg)
                 self.combine_annotations(gauss, fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
                 self.combine_bboxes(gauss, fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
                 gauss.binaries = cv2.cvtColor(gauss.binaries, cv2.COLOR_RGB2BGR)
-                # cv2.imwrite(self.save_path + gauss.name + ".jpg", gauss.binaries)
-                # self.save_annotation_file(gauss.annotations, gauss.name)
 
                 poiss: CombinedImage = self.poisson(fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
                 self.combine_annotations(poiss, fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
                 self.combine_bboxes(poiss, fg_position_x_in_bg, fg_position_y_in_bg, fgsize)
                 poiss.binaries = cv2.cvtColor(poiss.binaries, cv2.COLOR_RGB2BGR)
-                # cv2.imwrite(self.save_path + poiss.name + ".jpg", poiss.binaries)
-                # self.save_annotation_file(poiss.annotations, poiss.name)
 
                 images.extend([noblur, gauss, poiss])
                 break
