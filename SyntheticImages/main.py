@@ -214,9 +214,10 @@ class ImageCombinator:
                 break
             elif tries >= 10:
                 # rescale distractor if too large
+                print("rescaling distractor")
                 tries = 0
-                fgsize = ForegroundSize(int(round(distractor_image.height * 0.9)),
-                                        int(round(distractor_image.width * 0.9)))
+                fgsize = ForegroundSize(int(round(fgsize.height * 0.9)),
+                                        int(round(fgsize.width * 0.9)))
                 distractor_image = cv2.resize(distractor_image, (fgsize.width, fgsize.height),
                                               interpolation=cv2.INTER_AREA)
 
@@ -225,8 +226,11 @@ class ImageCombinator:
         mask: Image = Image.fromarray(distractor_image[:, :, 3])  # alpha Kanal
 
         # cv2 default is BGR --> conversion to RGB(A) for PIL
-        bg: Image = Image.fromarray(cv2.cvtColor(comb_image.binaries, cv2.COLOR_BGR2RGB))
-        fg: Image = Image.fromarray(cv2.cvtColor(distractor_image, cv2.COLOR_BGRA2RGBA))
+        # bg: Image = Image.fromarray(cv2.cvtColor(comb_image.binaries, cv2.COLOR_BGR2RGB))
+        # fg: Image = Image.fromarray(cv2.cvtColor(distractor_image, cv2.COLOR_BGRA2RGBA))
+
+        bg: Image = Image.fromarray(comb_image.binaries)
+        fg: Image = Image.fromarray(distractor_image)
 
         bg.paste(fg, box=(fg_position_x_in_bg, fg_position_y_in_bg), mask=mask)
         comb_image.binaries = np.array(bg)
@@ -237,10 +241,13 @@ class ImageCombinator:
         mask: Image = Image.fromarray(mask_gauss)
 
         # cv2 default is BGR --> conversion to RGB(A) for PIL
-        bg: Image = Image.fromarray(cv2.cvtColor(comb_image.binaries, cv2.COLOR_BGR2RGB))
-        fg: Image = Image.fromarray(cv2.cvtColor(distractor_image, cv2.COLOR_BGRA2RGBA))
-        bg.paste(fg, box=(fg_position_x_in_bg, fg_position_y_in_bg), mask=mask)
+        # bg: Image = Image.fromarray(cv2.cvtColor(comb_image.binaries, cv2.COLOR_BGR2RGB))
+        # fg: Image = Image.fromarray(cv2.cvtColor(distractor_image, cv2.COLOR_BGRA2RGBA))
 
+        bg: Image = Image.fromarray(comb_image.binaries)
+        fg: Image = Image.fromarray(distractor_image)
+
+        bg.paste(fg, box=(fg_position_x_in_bg, fg_position_y_in_bg), mask=mask)
         comb_image.binaries = np.array(bg)
 
     def distractor_poisson(self, distractor_image: np.ndarray, comb_image: CombinedImage, fg_position_x_in_bg: int,
@@ -248,8 +255,10 @@ class ImageCombinator:
                            fgsize: ForegroundSize) -> None:
         # completely white mask keeps more details in foreground
         mask_poisson: np.ndarray = np.full((distractor_image.shape[0], distractor_image.shape[1]), 255).astype("uint8")
-        fg: np.ndarray = cv2.cvtColor(distractor_image[:, :, 0:3], cv2.COLOR_BGR2RGB)
-        bg: np.ndarray = cv2.cvtColor(comb_image.binaries, cv2.COLOR_BGR2RGB)
+        # fg: np.ndarray = cv2.cvtColor(distractor_image[:, :, 0:3], cv2.COLOR_BGR2RGB)
+        # bg: np.ndarray = cv2.cvtColor(comb_image.binaries, cv2.COLOR_BGR2RGB)
+        fg: np.ndarray = distractor_image[:, :, 0:3]
+        bg: np.ndarray = comb_image.binaries
 
         center: tuple = (fg_position_x_in_bg + fgsize.width // 2, fg_position_y_in_bg + fgsize.height // 2)
         new: np.ndarray = cv2.seamlessClone(fg, bg, mask_poisson, center, cv2.NORMAL_CLONE)

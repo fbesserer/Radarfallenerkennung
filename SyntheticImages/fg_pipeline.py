@@ -92,6 +92,11 @@ class FGPreparation:
         Imagesize: namedtuple = namedtuple("Imagesize", ["height", "width"])
         imagesize = Imagesize(image.shape[0], image.shape[1])
 
+        if self.annot_class == -1:  # distractors are not scaled 
+            foregrounds.append(
+                Foreground(self.image_name, self.annot_class, image))
+            return foregrounds
+
         suffix = 1
         while imagesize.height > MIN_HEIGHT and imagesize.width > MIN_HEIGHT:
             if suffix > 1000:

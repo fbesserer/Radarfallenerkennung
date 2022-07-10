@@ -95,17 +95,18 @@ class BGPreparation:
     def random_erase(self, image):
         while True:
             size = random.randint(30, 40)
-            position_x = random.randint(0, 415 - size)
-            position_y = random.randint(0, 415 - size * 2)
+            position_x = random.randint(0, 416 - size * 2)
+            position_y = random.randint(0, 416 - size)
             rgb = np.dstack((np.random.randint(0, 256, (size, size * 2)),
                              np.random.randint(0, 256, (size, size * 2)),
                              np.random.randint(0, 256, (size, size * 2))))
-            if self.intersection_over_union(image, position_x, position_y, size) < 0.75:  # max 75% overlap
-                image.binaries[position_x:position_x + size, position_y:position_y + size * 2, :] = rgb
+            if self.overlap(image, position_x, position_y, size) < 0.75:  # max 75% overlap
+                image.binaries[position_y:position_y + size, position_x:position_x + size * 2, :] = rgb
                 break
 
-    def intersection_over_union(self, image: Background, position_x: int, position_y: int, size: int) -> float:
-        # calculate iou for all potential bboxes and the random_erase box
+    def overlap(self, image: Background, position_x: int, position_y: int,
+                size: int) -> float:
+        # calculate overlap for all potential bboxes
         max_overlap: float = 0
         erase_x1 = position_x
         erase_x2 = position_x + size * 2
@@ -118,10 +119,10 @@ class BGPreparation:
             y2 = min(erase_y2, bbox.y2)
 
             intersection_area = max(0, x2 - x1 + 1) * max(0, y2 - y1 + 1)
-            erase_area = (erase_x2 - erase_x1 + 1) * (erase_y2 - erase_y1 + 1)
             bbox_area = (bbox.x2 - bbox.x1 + 1) * (bbox.y2 - bbox.y1 + 1)
-            iou = intersection_area / (erase_area + bbox_area - intersection_area)
-            max_overlap = iou if iou > max_overlap else max_overlap
+
+            overlap = intersection_area / bbox_area
+            max_overlap = overlap if overlap > max_overlap else max_overlap
 
         return max_overlap
 

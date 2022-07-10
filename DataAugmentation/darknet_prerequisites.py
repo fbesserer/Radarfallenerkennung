@@ -4,8 +4,9 @@ import os
 import csv
 
 INITDIR = "F:\\RadarProjekt\\Training"
-# TXT_NAME= "train.txt"
-TXT_NAME = "test.txt"
+TXT_NAME= "train.txt"
+# TXT_NAME = "test.txt"
+# TXT_NAME = "valid.txt"
 
 
 def create_txt(path):
