@@ -1,8 +1,9 @@
 import torch
 from torch import nn, Tensor
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Using {device} device")
+# device = "cuda" if torch.cuda.is_available() else "cpu"
+# print(f"Using {device} device")
+device = "cpu"
 
 
 def channel_shuffle(x: Tensor, groups: int) -> Tensor:
@@ -28,17 +29,21 @@ class SqueezeExcitation(nn.Module):
         self.ratio = 8
         self.n: int = height_width
 
-        self.se = nn.Sequential(
-            nn.AvgPool2d(self.n),
-            nn.Linear(self.channels, self.channels // self.ratio, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(self.channels // self.ratio, self.channels, bias=False),
-            nn.Hardswish(inplace=True)
-        )
+        self.global_avg_pool = nn.AvgPool2d(self.n)
+        self.dense1 = nn.Linear(self.channels, self.channels // self.ratio, bias=False)
+        self.relu = nn.ReLU()
+        self.dense2 = nn.Linear(self.channels // self.ratio, self.channels, bias=False)
+        self.hardswish = nn.Hardswish()
 
-    def forward(self, x: Tensor) -> Tensor:  # x = BN Block
-        assert x.shape[2] == x.shape[3]
-        return x * self.se(x)
+    def forward(self, x: Tensor) -> Tensor:  # x = BN ReLU Block
+        block: Tensor = x
+        x = self.global_avg_pool(x)
+        x = x.view(x.shape[0], self.channels)
+        x = self.relu(self.dense1(x))
+        x = self.hardswish(self.dense2(x))
+        x = x[:, :, None, None]
+
+        return x * block
 
 
 class AttentiveShuffleNetUnit(nn.Module):
@@ -124,9 +129,13 @@ class EmbeddedYolo(nn.Module):
         x1 = self.stage2(x)
         x2 = self.stage3(x1)
         x3 = self.stage4(x2)
+        return x3
         # x1,x2,x3 in spp layer überführen
 
 
 if __name__ == "__main__":
     model = EmbeddedYolo().to(device)
     print(model)
+    fake_pic = torch.rand(1, 3, 416, 416, device=device)
+    logits = model(fake_pic)
+    print(logits.shape)
