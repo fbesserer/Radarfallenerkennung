@@ -21,13 +21,23 @@ def channel_shuffle(x: Tensor, groups: int) -> Tensor:
     return x
 
 
+class SqueezeExcitation(nn.Module):
+    def __init__(self, channels):
+        super(SqueezeExcitation, self).__init__()
+        self.channels = channels
+        self.ratio = 8
+
+    def forward(self, x: Tensor):  # x = BN Block
+        x = nn.AvgPool2d(self.channels)(x)
+
+
 class AttentiveShuffleNetUnit(nn.Module):
     def __init__(self, inp, oup, stride):
         super(AttentiveShuffleNetUnit, self).__init__()
 
         if not (1 <= stride <= 3):
             raise ValueError('illegal stride value')
-        self.stride = stride
+        self.stride = stride  # basic unit (stride = 1) or unit for spatial down sampling (stride=2)
 
         branch_features = oup // 2
         assert (self.stride != 1) or (inp == branch_features << 1)
@@ -41,7 +51,7 @@ class AttentiveShuffleNetUnit(nn.Module):
                 nn.ReLU(inplace=True),
             )
         else:
-            self.branch1 = nn.Sequential()
+            self.branch1 = nn.Sequential()  # why?
 
         self.branch2 = nn.Sequential(
             nn.Conv2d(inp if (self.stride > 1) else branch_features,
@@ -55,6 +65,8 @@ class AttentiveShuffleNetUnit(nn.Module):
             nn.ReLU(inplace=True),
         )
 
+        self.se = SqueezeExcitation(branch_features)  # 3 Blöcke für die unterschiedlichen Channels
+
     @staticmethod
     def depthwise_conv(i, o, kernel_size, stride=1, padding=0, bias=False):
         return nn.Conv2d(i, o, kernel_size, stride, padding, bias=bias, groups=i)
@@ -62,6 +74,9 @@ class AttentiveShuffleNetUnit(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         if self.stride == 1:
             x1, x2 = x.chunk(2, dim=1)
+            # branch2 = self.branch2(x2)
+            # branch2 = self.se(branch2)
+            # out: Tensor = torch.cat((x1, branch2), dim=1)
             out: Tensor = torch.cat((x1, self.branch2(x2)), dim=1)
         else:
             out: Tensor = torch.cat((self.branch1(x), self.branch2(x)), dim=1)
