@@ -13,9 +13,7 @@ def channel_shuffle(x: Tensor, groups: int) -> Tensor:
     # reshape
     x = x.view(batchsize, groups,
                channels_per_group, height, width)
-
     x = torch.transpose(x, 1, 2).contiguous()
-
     # flatten
     x = x.view(batchsize, -1, height, width)
 
@@ -66,7 +64,7 @@ class AttentiveShuffleNetUnit(nn.Module):
                 nn.ReLU(inplace=True),
             )
         else:
-            self.branch1 = nn.Sequential()  # why?
+            self.branch1 = nn.Sequential()  # why? vmtl nur für die model() Ausgabe
 
         self.branch2 = nn.Sequential(
             nn.Conv2d(in_channel if (self.stride > 1) else branch_features,
@@ -92,13 +90,24 @@ class AttentiveShuffleNetUnit(nn.Module):
             branch2 = self.branch2(x2)
             branch2 = self.se(branch2)
             out: Tensor = torch.cat((x1, branch2), dim=1)
-            # out: Tensor = torch.cat((x1, self.branch2(x2)), dim=1)
         else:
             out: Tensor = torch.cat((self.branch1(x), self.branch2(x)), dim=1)
 
         out = channel_shuffle(out, 2)
 
         return out
+
+
+class SPP(nn.Module):
+    def __init__(self):
+        super(SPP, self).__init__()
+        self.maxpool5 = nn.MaxPool2d(kernel_size=5, stride=1, padding=5 // 2)
+        self.maxpool9 = nn.MaxPool2d(kernel_size=9, stride=1, padding=9 // 2)
+        self.maxpool13 = nn.MaxPool2d(kernel_size=13, stride=1, padding=13 // 2)
+
+    def forward(self, x):
+        # spielt die Reihenfolge eine Rolle?
+        return torch.cat((self.maxpool13(x), self.maxpool9(x), self.maxpool5(x), x), dim=1)
 
 
 class EmbeddedYolo(nn.Module):
@@ -114,23 +123,38 @@ class EmbeddedYolo(nn.Module):
 
         input_channels = 24
         stage_names = [f'stage{i}' for i in [2, 3, 4]]
-        for name, repeats, output_channels, height_width in zip(stage_names, stages_repeats, self._stage_out_channels,
-                                                                self.height_width):
+        spp_names = [f'spp{i}' for i in range(2, 5)]
+        for name, spp, repeats, output_channels, height_width in zip(stage_names, spp_names,
+                                                                     stages_repeats,
+                                                                     self._stage_out_channels,
+                                                                     self.height_width):
             seq = [asu(input_channels, output_channels, height_width, stride=2)]
             for i in range(repeats - 1):
                 seq.append(asu(output_channels, output_channels, height_width, stride=1))
-            setattr(self, name, nn.Sequential(*seq))  # Seq sorgt dafür dass beim späteren durchreichen die outputs an
-            # die nächste repeat schicht weitergegeben wird
+            setattr(self, name, nn.Sequential(*seq))
+            setattr(self, spp, SPP())
             input_channels = output_channels
 
     def forward(self, x: Tensor) -> Tensor:
+        # ASU-SPP Network - backbone
         x = self.conv1(x)
         x = self.maxpool(x)
-        x1 = self.stage2(x)
-        x2 = self.stage3(x1)
-        x3 = self.stage4(x2)
-        return x3
-        # x1,x2,x3 in spp layer überführen
+        x = self.stage2(x)
+        spp2 = self.spp2(x)
+        assert spp2.shape[1:] == torch.Size([464, 52, 52])
+
+        x = self.stage3(x)
+        spp3 = self.spp3(x)
+        assert spp3.shape[1:] == torch.Size([928, 26, 26])
+
+        x = self.stage4(x)
+        spp4 = self.spp4(x)
+        assert spp4.shape[1:] == torch.Size([1856, 13, 13])
+        assert x.shape[1:] == torch.Size([464, 13, 13])
+
+        # PANet-Tiny - neck
+
+        return x
 
 
 if __name__ == "__main__":
