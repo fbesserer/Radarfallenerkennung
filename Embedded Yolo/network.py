@@ -1,5 +1,6 @@
 import torch
 from torch import nn, Tensor
+from torch.nn import functional
 
 # device = "cuda" if torch.cuda.is_available() else "cpu"
 # print(f"Using {device} device")
@@ -135,6 +136,12 @@ class EmbeddedYolo(nn.Module):
             setattr(self, spp, SPP())
             input_channels = output_channels
 
+        self.neck52_conv = nn.Conv2d(464, 96, kernel_size=1, stride=1)  # Bn und ReLU?
+        self.neck26_conv = nn.Conv2d(928, 96, kernel_size=1, stride=1)
+        self.neck13_conv = nn.Conv2d(1856, 96, kernel_size=1, stride=1)
+
+        # self.neck3_up = nn.Upsample(26, mode='bilinear', align_corners=False)
+
     def forward(self, x: Tensor) -> Tensor:
         # ASU-SPP Network - backbone
         x = self.conv1(x)
@@ -153,6 +160,37 @@ class EmbeddedYolo(nn.Module):
         assert x.shape[1:] == torch.Size([464, 13, 13])
 
         # PANet-Tiny - neck
+        # neck52 N x 96 x 52 x 52
+        neck52 = self.neck52_conv(spp2)
+        # neck26 N x 96 x 26 x 26
+        neck26 = self.neck26_conv(spp3)
+        # neck13 N x 96 x 13 x 13
+        neck13 = self.neck13_conv(spp4)
+
+        # neck13_up N x 96 x 26 x 26
+        neck13_up = functional.interpolate(neck13, scale_factor=2, mode='bilinear')
+        assert neck13_up.shape[1:] == torch.Size([96, 26, 26])
+        # neck26 N x 96 x 26 x 26
+        neck26 = torch.add(neck26, neck13_up)
+        assert neck26.shape[1:] == torch.Size([96, 26, 26])
+        # neck26_up N x 96 x 52 x 52
+        neck26_up = functional.interpolate(neck26, scale_factor=2, mode='bilinear')
+        assert neck26_up.shape[1:] == torch.Size([96, 52, 52])
+        # output1 N x 96 x 52 x 52
+        output1 = torch.add(neck52, neck26_up)
+        assert output1.shape[1:] == torch.Size([96, 52, 52])
+        # output1_down N x 96 x 26 x 26
+        output1_down = functional.interpolate(output1, scale_factor=0.5, mode='bilinear')
+        assert output1_down.shape[1:] == torch.Size([96, 26, 26])
+        # output2 N x 96 x 26 x 26
+        output2 = torch.add(output1_down, neck26)
+        assert output2.shape[1:] == torch.Size([96, 26, 26])
+        # output2_down N x 96 x 13 x 13
+        output2_down = functional.interpolate(output2, scale_factor=0.5, mode='bilinear')
+        assert output2_down.shape[1:] == torch.Size([96, 13, 13])
+        # output2_down N x 96 x 13 x 13
+        output3 = torch.add(output2_down, neck13)
+        assert output3.shape[1:] == torch.Size([96, 13, 13])
 
         return x
 
@@ -162,4 +200,4 @@ if __name__ == "__main__":
     print(model)
     fake_pic = torch.rand(1, 3, 416, 416, device=device)
     logits = model(fake_pic)
-    print(logits.shape)
+    # print(logits.shape)
