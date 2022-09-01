@@ -1,3 +1,5 @@
+from typing import List, Tuple, Any
+
 import torch
 from torch import nn, Tensor
 from torch.nn import functional
@@ -111,9 +113,9 @@ class SPP(nn.Module):
         return torch.cat((self.maxpool13(x), self.maxpool9(x), self.maxpool5(x), x), dim=1)
 
 
-class EmbeddedYolo(nn.Module):
+class Backbone(nn.Module):
     def __init__(self):
-        super(EmbeddedYolo, self).__init__()
+        super(Backbone, self).__init__()
         asu = AttentiveShuffleNetUnit
         stages_repeats = [3, 7, 3]  # oder 4,8,4 wie im ShuffleNetv2?
         self._stage_out_channels = [116, 232, 464]
@@ -130,42 +132,48 @@ class EmbeddedYolo(nn.Module):
                                                                      self._stage_out_channels,
                                                                      self.height_width):
             seq = [asu(input_channels, output_channels, height_width, stride=2)]
-            for i in range(repeats - 1):
+            for _ in range(repeats - 1):
                 seq.append(asu(output_channels, output_channels, height_width, stride=1))
             setattr(self, name, nn.Sequential(*seq))
             setattr(self, spp, SPP())
             input_channels = output_channels
 
-        self.neck52_conv = nn.Conv2d(464, 96, kernel_size=1, stride=1)  # Bn und ReLU?
-        self.neck26_conv = nn.Conv2d(928, 96, kernel_size=1, stride=1)
-        self.neck13_conv = nn.Conv2d(1856, 96, kernel_size=1, stride=1)
-
-        # self.neck3_up = nn.Upsample(26, mode='bilinear', align_corners=False)
-
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor) -> Tuple[Tensor, ...]:
         # ASU-SPP Network - backbone
         x = self.conv1(x)
         x = self.maxpool(x)
         x = self.stage2(x)
-        spp2 = self.spp2(x)
+        spp2: Tensor = self.spp2(x)
         assert spp2.shape[1:] == torch.Size([464, 52, 52])
 
         x = self.stage3(x)
-        spp3 = self.spp3(x)
+        spp3: Tensor = self.spp3(x)
         assert spp3.shape[1:] == torch.Size([928, 26, 26])
 
         x = self.stage4(x)
-        spp4 = self.spp4(x)
+        spp4: Tensor = self.spp4(x)
         assert spp4.shape[1:] == torch.Size([1856, 13, 13])
         assert x.shape[1:] == torch.Size([464, 13, 13])
 
+        return spp2, spp3, spp4
+
+
+class Neck(nn.Module):
+    def __init__(self):
+        super(Neck, self).__init__()
+
+        self.neck52_conv = nn.Conv2d(464, 96, kernel_size=1, stride=1)  # Bn und ReLU?
+        self.neck26_conv = nn.Conv2d(928, 96, kernel_size=1, stride=1)
+        self.neck13_conv = nn.Conv2d(1856, 96, kernel_size=1, stride=1)
+
+    def forward(self, spp: Tuple[Tensor, ...]) -> Tuple[Tensor, ...]:
         # PANet-Tiny - neck
         # neck52 N x 96 x 52 x 52
-        neck52 = self.neck52_conv(spp2)
+        neck52 = self.neck52_conv(spp[0])
         # neck26 N x 96 x 26 x 26
-        neck26 = self.neck26_conv(spp3)
+        neck26 = self.neck26_conv(spp[1])
         # neck13 N x 96 x 13 x 13
-        neck13 = self.neck13_conv(spp4)
+        neck13 = self.neck13_conv(spp[2])
 
         # neck13_up N x 96 x 26 x 26
         neck13_up = functional.interpolate(neck13, scale_factor=2, mode='bilinear')
@@ -192,7 +200,90 @@ class EmbeddedYolo(nn.Module):
         output3 = torch.add(output2_down, neck13)
         assert output3.shape[1:] == torch.Size([96, 13, 13])
 
-        return x
+        return output1, output2, output3
+
+
+class Head(nn.Module):
+    def __init__(self):
+        super(Head, self).__init__()
+        self.head = nn.Sequential(
+            nn.Conv2d(96, 96, kernel_size=5, stride=1, padding=2, groups=96),
+            nn.Conv2d(96, 96, kernel_size=1, stride=1),
+            nn.Conv2d(96, 96, kernel_size=5, stride=1, padding=2, groups=96),
+            nn.Conv2d(96, 96, kernel_size=1, stride=1),
+            nn.Conv2d(96, 9, kernel_size=1, stride=1)  # 4 classes + 4 Bbox-Werte + 1 centerness
+        )
+
+    def forward(self, output: Tensor) -> Tuple[List[Tensor], List[Tensor], List[Tensor]]:
+        # tiny-head
+        logits = []
+        bboxes = []
+        centers = []
+        # split up head into class, bboxes and centerness
+        output1 = self.head(output[0])
+        assert output1.shape[1:] == torch.Size([9, 52, 52])
+        logits.append(output1[:, 0:4, :, :])
+        bboxes.append(output1[:, 4:8, :, :])
+        centers.append(output1[:, 8:, :, :])
+
+        output2 = self.head(output[1])
+        assert output2.shape[1:] == torch.Size([9, 26, 26])
+        logits.append(output2[:, 0:4, :, :])
+        bboxes.append(output2[:, 4:8, :, :])
+        centers.append(output2[:, 8:, :, :])
+
+        output3 = self.head(output[2])
+        assert output3.shape[1:] == torch.Size([9, 13, 13])
+        logits.append(output3[:, 0:4, :, :])
+        bboxes.append(output3[:, 4:8, :, :])
+        centers.append(output3[:, 8:, :, :])
+
+        return logits, bboxes, centers
+
+
+class EmbeddedYolo(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+        self.backbone = Backbone()
+        self.neck = Neck()
+        self.head = Head()
+
+    # def train(self, mode=True):
+    #     super().train(mode)
+    #
+    #     def freeze_bn(module):
+    #         if isinstance(module, nn.BatchNorm2d):
+    #             module.eval()
+    #
+    #     self.apply(freeze_bn)
+
+    def forward(self, input, image_sizes=None, targets=None):
+        features = self.backbone(input)
+        features = self.neck(features)
+        cls_pred, box_pred, center_pred = self.head(features)
+        # print(cls_pred, box_pred, center_pred)
+        location = self.compute_location(features)
+
+        if self.training:
+            loss_cls, loss_box, loss_center = self.loss(
+                location, cls_pred, box_pred, center_pred, targets
+            )
+            losses = {
+                'loss_cls': loss_cls,
+                'loss_box': loss_box,
+                'loss_center': loss_center,
+            }
+
+            return None, losses
+
+        else:
+            boxes = self.postprocessor(
+                location, cls_pred, box_pred, center_pred, image_sizes
+            )
+
+            return boxes, None
 
 
 if __name__ == "__main__":
