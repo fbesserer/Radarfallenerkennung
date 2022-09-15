@@ -1,4 +1,6 @@
 import argparse
+from typing import List
+
 import torch
 from torch import optim, nn
 from torch.utils.data import DataLoader
@@ -6,6 +8,62 @@ from tqdm import tqdm
 from utils import init_seeds, parse_data_cfg
 from dataset import ImagesAndLabels, collate_fn
 from network import EmbeddedYolo
+from boxtargets import BoxTarget
+
+
+def accumulate_predictions(predictions):
+    all_predictions = [predictions]
+
+    # if get_rank() != 0:
+    #     return
+
+    predictions = {}
+
+    for p in all_predictions:
+        predictions.update(p)
+
+    ids = list(sorted(predictions.keys()))
+
+    if len(ids) != ids[-1] + 1:
+        print('Evaluation results is not contiguous')
+
+    predictions = [predictions[i] for i in ids]
+
+    return predictions
+
+
+@torch.no_grad()
+def valid(loader, dataset, model, device):
+    torch.cuda.empty_cache()
+
+    model.eval()
+
+    pbar = tqdm(loader, dynamic_ncols=True)
+
+    preds: dict = {}
+
+    for images, targets, ids in pbar:
+        model.zero_grad()
+
+        images = images.to(device)
+        # targets = [target.to(device) for target in targets]
+
+        pred, _ = model(images.tensors, images.sizes)
+
+        pred = [p.to('cpu') for p in pred]
+
+        preds.update({id: p for id, p in zip(ids, pred)})
+    # todo: auf gleichheit prüfen predictions und preds
+    ids = list(sorted(preds.keys()))
+    predictions = [preds[i] for i in ids]
+
+    preds: List[BoxTarget, ...] = accumulate_predictions(preds)
+    assert preds == predictions
+
+    # if get_rank() != 0:
+    #     return
+
+    evaluate(dataset, preds)
 
 
 def train(epoch, loader, model, optimizer, device):
@@ -64,6 +122,13 @@ if __name__ == "__main__":
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
     parser.add_argument('--adam', action='store_true', help='use adam optimizer')
     opt = parser.parse_args()
+    opt.n_class = 5
+    opt.threshold = 0.05
+    opt.top_n = 1000
+    opt.nms_threshold = 0.6
+    opt.post_top_n = 100
+    opt.min_size = 0
+
     device = 'cuda' if torch.cuda.is_available() == 1 else 'cpu'
     # device = 'cpu'
 
@@ -96,7 +161,7 @@ if __name__ == "__main__":
         collate_fn=collate_fn(),
     )
 
-    model = EmbeddedYolo()
+    model = EmbeddedYolo(opt)
     model = model.to(device)
 
     optimizer = optim.SGD(
@@ -119,8 +184,8 @@ if __name__ == "__main__":
     #     )
 
     for epoch in range(opt.epochs):
-        train(epoch, train_loader, model, optimizer, device)
-        # valid(args, epoch, valid_loader, valid_set, model, device)
+        # train(epoch, train_loader, model, optimizer, device)
+        valid(valid_loader, valid_set, model, device)
 
         scheduler.step()
 

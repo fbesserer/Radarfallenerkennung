@@ -3,6 +3,8 @@ from typing import List, Tuple, Any
 import torch
 from torch import nn, Tensor
 from torch.nn import functional
+from loss import FCOSLoss
+from postprocess import FCOSPostprocessor
 
 # device = "cuda" if torch.cuda.is_available() else "cpu"
 # print(f"Using {device} device")
@@ -243,12 +245,24 @@ class Head(nn.Module):
 
 class EmbeddedYolo(nn.Module):
 
-    def __init__(self):
+    def __init__(self, opt):
         super().__init__()
 
         self.backbone = Backbone()
         self.neck = Neck()
         self.head = Head()
+        self.fpn_strides = [8, 16, 32]
+        self.loss = FCOSLoss(
+            self.fpn_strides
+        )
+        self.postprocessor = FCOSPostprocessor(
+            opt.threshold,
+            opt.top_n,
+            opt.nms_threshold,
+            opt.post_top_n,
+            opt.min_size,
+            opt.n_class,
+        )
 
     # def train(self, mode=True):
     #     super().train(mode)
@@ -284,6 +298,33 @@ class EmbeddedYolo(nn.Module):
             )
 
             return boxes, None
+
+    def compute_location(self, features):
+        # Koordinatenberechnung der Mittelpunkte der Feature Map Grid Zellen (in Pixel bezogen auf Ursprungsbild)
+        locations = []
+
+        for i, feat in enumerate(features):  # größte bis kleinste feature map
+            _, _, height, width = feat.shape
+            location_per_level = self.compute_location_per_level(
+                height, width, self.fpn_strides[i], feat.device
+            )
+            locations.append(location_per_level)
+
+        return locations
+
+    def compute_location_per_level(self, height, width, stride, device):
+        shift_x = torch.arange(
+            0, width * stride, step=stride, dtype=torch.float32, device=device
+        )
+        shift_y = torch.arange(
+            0, height * stride, step=stride, dtype=torch.float32, device=device
+        )
+        shift_y, shift_x = torch.meshgrid(shift_y, shift_x)
+        shift_x = shift_x.reshape(-1)
+        shift_y = shift_y.reshape(-1)
+        location = torch.stack((shift_x, shift_y), 1) + stride // 2  # // 2 damit Rückübersetzung im Zentrum liegt
+
+        return location
 
 
 if __name__ == "__main__":
