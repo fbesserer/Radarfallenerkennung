@@ -148,3 +148,118 @@ def collate_fn():
         return imgs, targets, ids
 
     return collate_data
+
+# def transform_to_dict(target, id) -> dict:
+#     # transforms the BoxTarget Object into normal dict in order to be able to use pytorch evaluate()
+#     d = {}
+#     target = target[0]
+#     d['boxes'] = target.box
+#     d['labels'] = target.fields['labels']
+#     d['image_id'] = id
+#     d['area'] = target.area()
+#     d['iscrowd'] = False
+#     return d
+#
+#
+# def collate_fn_eval():  # überprüfen ob es auch mit batchsize > 1 geht
+#     def collate_data(batch):
+#         batch = list(zip(*batch))
+#         imgs = image_list(batch[0]).tensors
+#         targets = batch[1]
+#         ids = batch[2]
+#         targets = transform_to_dict(targets, ids)
+#
+#         return imgs, targets
+#
+#     return collate_data
+
+# # war ursprünglich für pytorch coco_eval etc Skripte gedacht
+# class ImagesAndLabelsValidationSet(Dataset):
+#     def __init__(self, path):
+#         self.path = str(Path(path))
+#         with open(path, 'r') as f:
+#             self.img_files = [x.replace('/', os.sep) for x in f.read().splitlines()  # os-agnostic
+#                               if os.path.splitext(x)[-1].lower() in IMG_FORMATS]
+#
+#         self.label_files = [x.replace('images', 'labels').replace(os.path.splitext(x)[-1], '.txt')
+#                             for x in self.img_files]
+#         n = len(self.img_files)
+#
+#         # Cache labels
+#         self.imgs = [None] * n
+#         self.labels = [np.zeros((0, 5), dtype=np.float32)] * n  # 1 label wert + x,y,w,h
+#         pbar = tqdm(self.label_files, desc='Caching labels')
+#         nm, nf, ne, ns, nd = 0, 0, 0, 0, 0  # number missing, found, empty, datasubset, duplicate
+#         for i, file in enumerate(pbar):
+#             try:
+#                 with open(file, 'r') as f:
+#                     l = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
+#             except:
+#                 nm += 1  # file missing
+#                 continue
+#
+#             if l.shape[0]:  # check ob alle annotations korrekt (label, x,y,w,h)
+#                 assert l.shape[1] == 5, '> 5 label columns: %s' % file
+#                 assert (l >= 0).all(), 'negative labels: %s' % file
+#                 assert (l[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels: %s' % file
+#                 if np.unique(l, axis=0).shape[0] < l.shape[0]:  # duplicate rows
+#                     nd += 1  # duplicate rows
+#                 self.labels[i] = l
+#                 nf += 1  # file found
+#
+#             else:
+#                 ne += 1  # file empty
+#
+#             pbar.desc = 'Caching labels (%g found, %g missing, %g empty, %g duplicate, for %g images)' % (
+#                 nf, nm, ne, nd, n)
+#         assert nf > 0, 'No labels found in %s' % (os.path.dirname(file) + os.sep)
+#         # load all image files, sorting them to
+#         # ensure that they are aligned
+#         # self.imgs = list(sorted(os.listdir(os.path.join(path, "PNGImages"))))
+#         # self.masks = list(sorted(os.listdir(os.path.join(path, "PedMasks"))))
+#
+#     def __getitem__(self, idx):
+#         # Load image
+#         img, (h0, w0) = load_image(self, idx)
+#         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
+#         img = np.ascontiguousarray(img)  # Speicheroptimierung
+#         img = torch.tensor(img, dtype=torch.float32)
+#
+#         # Load labels
+#         labels = []
+#         x = self.labels[idx]
+#         if x.size > 0:
+#             # von Normalized xywh to pixel xyxy format
+#             labels = x.copy()
+#             labels[:, 1] = w0 * (x[:, 1] - x[:, 3] / 2)  # warum 1-4? weil 0 == label
+#             labels[:, 2] = h0 * (x[:, 2] - x[:, 4] / 2)
+#             labels[:, 3] = w0 * (x[:, 1] + x[:, 3] / 2)
+#             labels[:, 4] = h0 * (x[:, 2] + x[:, 4] / 2)
+#         # BoxList Objekt erstellen, ursprüngliche Konvertierung war von nicht normalisierten xywh auf xyxy
+#         boxes: List = [box[1:] for box in labels]  # nur die xyxy Werte übernehmen
+#         boxes: Tensor = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
+#         classes: List = [label[0] for label in labels]
+#         classes: Tensor = torch.tensor(classes, dtype=torch.int64)
+#
+#         # convert everything into a torch.Tensor
+#         # boxes = torch.as_tensor(boxes, dtype=torch.float32)
+#         # there is only one class -> daher nur torch.ones
+#         # labels = torch.ones((num_objs,), dtype=torch.int64)
+#         # masks = torch.as_tensor(masks, dtype=torch.uint8)
+#
+#         image_id = torch.tensor([idx])
+#         area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
+#         # suppose all instances are not crowd
+#         iscrowd = torch.zeros((len(boxes),), dtype=torch.int64)
+#
+#         target = {}
+#         target["boxes"] = boxes
+#         target["labels"] = classes
+#         target["image_id"] = image_id
+#         target["area"] = area
+#         target["iscrowd"] = iscrowd
+#
+#         return img, target
+#
+#     def __len__(self):
+#         return len(self.img_files)

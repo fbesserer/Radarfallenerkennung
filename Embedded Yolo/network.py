@@ -328,7 +328,17 @@ class EmbeddedYolo(nn.Module):
 
 
 if __name__ == "__main__":
-    model = EmbeddedYolo().to(device)
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    opt = parser.parse_args()
+    opt.n_class = 5
+    opt.threshold = 0.05
+    opt.top_n = 1000
+    opt.nms_threshold = 0.6
+    opt.post_top_n = 100
+    opt.min_size = 0
+    model = EmbeddedYolo(opt).to(device)
     print(model)
     fake_pic = torch.rand(1, 3, 416, 416, device=device)
     logits = model(fake_pic)

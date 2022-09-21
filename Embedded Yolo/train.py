@@ -1,14 +1,15 @@
 import argparse
-from typing import List
+from typing import List, Any, Dict
 
 import torch
-from torch import optim, nn
+from torch import optim, nn, Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from utils import init_seeds, parse_data_cfg
 from dataset import ImagesAndLabels, collate_fn
 from network import EmbeddedYolo
 from boxtargets import BoxTarget
+from evaluate import Metrics
 
 
 def accumulate_predictions(predictions):
@@ -32,38 +33,57 @@ def accumulate_predictions(predictions):
     return predictions
 
 
-@torch.no_grad()
-def valid(loader, dataset, model, device):
-    torch.cuda.empty_cache()
+def format_pred(preds: List[BoxTarget]) -> List[Dict[str, Tensor]]:
+    # format needed for torchmetrics evaluation
+    predictions: list = []
+    for pred in preds:
+        d: dict = {}
+        d['boxes'] = pred.box
+        d['scores'] = pred.fields.get('scores')
+        d['labels'] = pred.fields['labels']
+        predictions.append(d)
+    return predictions
 
+
+@torch.no_grad()
+def valid(loader, metrics, model, device):
+    torch.cuda.empty_cache()
     model.eval()
 
     pbar = tqdm(loader, dynamic_ncols=True)
 
-    preds: dict = {}
-
+    preds: list = []
+    targets_all: list = []
+    # collect all predictions
     for images, targets, ids in pbar:
         model.zero_grad()
 
         images = images.to(device)
         # targets = [target.to(device) for target in targets]
-
+        pred: List[BoxTarget]
         pred, _ = model(images.tensors, images.sizes)
+        pred = [p.to('cuda') for p in pred]
+        pred: List[Dict[str, Tensor]] = format_pred(pred)
+        preds.extend(pred)
 
-        pred = [p.to('cpu') for p in pred]
+        targets = [t.to('cuda') for t in targets]
+        target: List[Dict[str, Tensor]] = format_pred(targets)
+        targets_all.extend(target)
 
-        preds.update({id: p for id, p in zip(ids, pred)})
     # todo: auf gleichheit prüfen predictions und preds
-    ids = list(sorted(preds.keys()))
-    predictions = [preds[i] for i in ids]
-
-    preds: List[BoxTarget, ...] = accumulate_predictions(preds)
-    assert preds == predictions
+    # ids = list(sorted(preds.keys()))
+    # predictions = [preds[i] for i in ids]
+    #
+    # preds: List[BoxTarget, ...] = accumulate_predictions(preds)
+    # assert preds == predictions
 
     # if get_rank() != 0:
     #     return
-
-    evaluate(dataset, preds)
+    # evaluate all predictions with their respective targets
+    import time
+    start = time.perf_counter()
+    metrics.evaluate(preds, targets_all)
+    print(f"evaluation time: ", time.perf_counter() - start)
 
 
 def train(epoch, loader, model, optimizer, device):
@@ -107,7 +127,7 @@ def train(epoch, loader, model, optimizer, device):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=100)  # 500200 batches at bs 16, 117263 COCO images = 273 epochs
+    parser.add_argument('--epochs', type=int, default=35)  # 500200 batches at bs 16, 117263 COCO images = 273 epochs
     parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     parser.add_argument('--data', type=str, default='data/radar.data', help='*.data path')
     parser.add_argument('--resume', action='store_true', help='resume training from last.pt')
@@ -183,14 +203,20 @@ if __name__ == "__main__":
     #         broadcast_buffers=False,
     #     )
 
+    # todo save path umsetzen als arg
+    path = "/"
+    metrics: Metrics = Metrics(path)
+
     for epoch in range(opt.epochs):
-        # train(epoch, train_loader, model, optimizer, device)
-        valid(valid_loader, valid_set, model, device)
+        train(epoch, train_loader, model, optimizer, device)
+        valid(valid_loader, metrics, model, device)
 
         scheduler.step()
-
+        # evaluate(model, valid_loader, device=device)
+        # print("evaluation done")
         # if get_rank() == 0:
-        torch.save(
-            {'model': model.module.state_dict(), 'optim': optimizer.state_dict()},
-            f'checkpoint/epoch-{epoch + 1}.pt',
-        )
+
+        # torch.save(
+        #     {'model': model.module.state_dict(), 'optim': optimizer.state_dict()},
+        #     f'checkpoint/epoch-{epoch + 1}.pt',
+        # )
