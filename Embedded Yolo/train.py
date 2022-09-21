@@ -1,5 +1,6 @@
 import argparse
 from typing import List, Any, Dict
+import time
 
 import torch
 from torch import optim, nn, Tensor
@@ -49,17 +50,16 @@ def format_pred(preds: List[BoxTarget]) -> List[Dict[str, Tensor]]:
 def valid(loader, metrics, model, device):
     torch.cuda.empty_cache()
     model.eval()
-
     pbar = tqdm(loader, dynamic_ncols=True)
 
     preds: list = []
     targets_all: list = []
+
     # collect all predictions
     for images, targets, ids in pbar:
         model.zero_grad()
 
         images = images.to(device)
-        # targets = [target.to(device) for target in targets]
         pred: List[BoxTarget]
         pred, _ = model(images.tensors, images.sizes)
         pred = [p.to('cuda') for p in pred]
@@ -70,20 +70,10 @@ def valid(loader, metrics, model, device):
         target: List[Dict[str, Tensor]] = format_pred(targets)
         targets_all.extend(target)
 
-    # todo: auf gleichheit prüfen predictions und preds
-    # ids = list(sorted(preds.keys()))
-    # predictions = [preds[i] for i in ids]
-    #
-    # preds: List[BoxTarget, ...] = accumulate_predictions(preds)
-    # assert preds == predictions
-
-    # if get_rank() != 0:
-    #     return
     # evaluate all predictions with their respective targets
-    import time
     start = time.perf_counter()
     metrics.evaluate(preds, targets_all)
-    print(f"evaluation time: ", time.perf_counter() - start)
+    print(f"evaluation time: {round(time.perf_counter() - start, 2)} s")
 
 
 def train(epoch, loader, model, optimizer, device):
@@ -212,8 +202,6 @@ if __name__ == "__main__":
         valid(valid_loader, metrics, model, device)
 
         scheduler.step()
-        # evaluate(model, valid_loader, device=device)
-        # print("evaluation done")
         # if get_rank() == 0:
 
         # torch.save(
