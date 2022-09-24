@@ -10,7 +10,7 @@ from utils import init_seeds, parse_data_cfg
 from dataset import ImagesAndLabels, collate_fn
 from network import EmbeddedYolo
 from boxtargets import BoxTarget
-from evaluate import Metrics
+from evaluate import evaluate
 
 
 def accumulate_predictions(predictions):
@@ -47,7 +47,7 @@ def format_pred(preds: List[BoxTarget]) -> List[Dict[str, Tensor]]:
 
 
 @torch.no_grad()
-def valid(loader, metrics, model, device):
+def valid(loader, valid_set, model, device):
     torch.cuda.empty_cache()
     model.eval()
     pbar = tqdm(loader, dynamic_ncols=True)
@@ -72,7 +72,7 @@ def valid(loader, metrics, model, device):
 
     # evaluate all predictions with their respective targets
     start = time.perf_counter()
-    metrics.evaluate(preds, targets_all)
+    evaluate(preds, targets_all)
     print(f"evaluation time: {round(time.perf_counter() - start, 2)} s")
 
 
@@ -85,8 +85,8 @@ def train(epoch, loader, model, optimizer, device):
     # else:
     #     pbar = loader
 
-    for images, targets, _ in pbar:
-        model.zero_grad()
+    for batch_nr, (images, targets, _) in enumerate(pbar):
+        model.zero_grad()  # alle Gradienten auf 0 sonst werden diese akkumuliert aus vorherigem batch
 
         images = images.to(device)
         targets = [target.to(device) for target in targets]
@@ -113,6 +113,9 @@ def train(epoch, loader, model, optimizer, device):
                 f'box: {loss_box:.4f}; center: {loss_center:.4f}'
             )
         )
+        # with open("loss_logging.txt", 'a') as loss_file:  # debugging nan fehler
+        #     loss_file.writelines(
+        #         f"loss: {loss:.4f} at epoch: {epoch}, batch {batch_nr} | loss_cls: {loss_cls:.4f} loss_box: {loss_box:.4f} loss_center: {loss_center:.4f}\n")
 
 
 if __name__ == "__main__":
@@ -193,13 +196,9 @@ if __name__ == "__main__":
     #         broadcast_buffers=False,
     #     )
 
-    # todo save path umsetzen als arg
-    path = "/"
-    metrics: Metrics = Metrics(path)
-
     for epoch in range(opt.epochs):
         train(epoch, train_loader, model, optimizer, device)
-        valid(valid_loader, metrics, model, device)
+        valid(valid_loader, valid_set, model, device)
 
         scheduler.step()
         # if get_rank() == 0:

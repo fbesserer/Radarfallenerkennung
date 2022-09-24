@@ -1,3 +1,4 @@
+import time
 from typing import List, Tuple
 import torch
 
@@ -45,6 +46,10 @@ class IOULoss(nn.Module):
             g_intersect = g_w_intersect * g_h_intersect + 1e-7
             gious = ious - (g_intersect - area_union) / g_intersect
 
+            if torch.any(torch.isnan(gious)):
+                print("nan in box loss")
+                gious[
+                    torch.isnan(gious)] = 0  # passiert, wenn die predictions so große zahlen liefern, dass area == inf
             loss = 1 - gious
 
         if weight is not None and weight.sum() > 0:
@@ -79,9 +84,9 @@ class SigmoidFocalLoss(nn.Module):
 
         gamma: float = self.gamma
         alpha: float = self.alpha
-
-        term1: Tensor = (1 - p) ** gamma * torch.log(p)
-        term2: Tensor = p ** gamma * torch.log(1 - p)
+        eps: float = 1e-30
+        term1: Tensor = (1 - p) ** gamma * torch.log(p + eps)
+        term2: Tensor = p ** gamma * torch.log(1 - p + eps)
 
         # print(term1.sum(), term2.sum())
 
@@ -89,6 +94,15 @@ class SigmoidFocalLoss(nn.Module):
                 -(t == class_ids).float() * alpha * term1
                 - ((t != class_ids) * (t >= 0)).float() * (1 - alpha) * term2
         )
+
+        if torch.any(torch.isnan(torch.reshape(loss, (-1,)))):
+            print("nan in cls loss")
+            with open("sigmoidfocalloss.txt", 'a') as loss_file:
+                torch.set_printoptions(profile="full")  # debugging nan fehler
+                loss_file.writelines(
+                    f"loss: {loss}\nout: {out}\nn_class: {n_class}\nclass_ids {class_ids}\n"
+                    f"t: {t}\np: {p}\nterm1: {term1}\nterm2: {term2}\n")
+                torch.set_printoptions(profile="default")
         return loss.sum()
 
 
