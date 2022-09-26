@@ -296,8 +296,16 @@ class EmbeddedYolo(nn.Module):
             boxes = self.postprocessor(
                 location, cls_pred, box_pred, center_pred, image_sizes
             )
+            loss_cls, loss_box, loss_center = self.loss(
+                location, cls_pred, box_pred, center_pred, targets
+            )
+            losses = {
+                'loss_cls': loss_cls,
+                'loss_box': loss_box,
+                'loss_center': loss_center,
+            }
 
-            return boxes, None
+            return boxes, losses
 
     def compute_location(self, features):
         # Koordinatenberechnung der Mittelpunkte der Feature Map Grid Zellen (in Pixel bezogen auf Ursprungsbild)

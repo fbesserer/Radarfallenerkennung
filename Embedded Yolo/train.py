@@ -5,6 +5,7 @@ import time
 import torch
 from torch import optim, nn, Tensor
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from utils import init_seeds, parse_data_cfg
 from dataset import ImagesAndLabels, collate_fn
@@ -47,43 +48,74 @@ def format_pred(preds: List[BoxTarget]) -> List[Dict[str, Tensor]]:
 
 
 @torch.no_grad()
-def valid(loader, valid_set, model, device):
+def valid(loader, valid_set, model, device, val=True):
     torch.cuda.empty_cache()
     model.eval()
     pbar = tqdm(loader, dynamic_ncols=True)
 
     preds: list = []
     targets_all: list = []
+    loss_mean = torch.zeros(4)
 
     # collect all predictions
-    for images, targets, ids in pbar:
+    for batch_nr, (images, targets, ids) in enumerate(pbar):
         model.zero_grad()
-
-        images = images.to(device)
-        pred: List[BoxTarget]
-        pred, _ = model(images.tensors, images.sizes)
-        pred = [p.to('cuda') for p in pred]
-        pred: List[Dict[str, Tensor]] = format_pred(pred)
-        preds.extend(pred)
 
         targets = [t.to('cuda') for t in targets]
         target: List[Dict[str, Tensor]] = format_pred(targets)
         targets_all.extend(target)
 
+        images = images.to(device)
+        pred: List[BoxTarget]
+        pred, loss_dict = model(images.tensors, images.sizes, targets=targets)
+        pred = [p.to('cuda') for p in pred]
+        pred: List[Dict[str, Tensor]] = format_pred(pred)
+        preds.extend(pred)
+
+        # _, loss_dict = model(images.tensors, targets=targets)
+        loss_cls = loss_dict['loss_cls'].mean()
+        loss_box = loss_dict['loss_box'].mean()
+        loss_center = loss_dict['loss_center'].mean()
+        loss = loss_cls + loss_box + loss_center
+
+        loss_mean[0] = (batch_nr * loss_mean[0] + loss) / (batch_nr + 1)
+        loss_mean[1] = (batch_nr * loss_mean[1] + loss_cls) / (batch_nr + 1)
+        loss_mean[2] = (batch_nr * loss_mean[2] + loss_box) / (batch_nr + 1)
+        loss_mean[3] = (batch_nr * loss_mean[3] + loss_center) / (batch_nr + 1)
+
+        pbar.set_description(
+            (
+                f'epoch: {epoch}; cls: {loss_cls:.4f}; '
+                f'box: {loss_box:.4f}; center: {loss_center:.4f}'
+            )
+        )
+
     # evaluate all predictions with their respective targets
     start = time.perf_counter()
-    evaluate(preds, targets_all)
+    metrics: Dict[str, Tensor] = evaluate(preds, targets_all)
     print(f"evaluation time: {round(time.perf_counter() - start, 2)} s")
+
+    if tb_writer:
+        # metrics
+        prefix = "val/" if val else "train/"
+        metrics: List = sorted(metrics.items(), key=lambda x: x[0])
+        tags = [prefix + key[0] for key in metrics]
+        tensors = [val[1] for val in metrics]
+        for x, tag in zip(tensors, tags):
+            tb_writer.add_scalar(tag, x, epoch)
+
+        # losses
+        tags = [prefix + 'loss', prefix + 'cls_loss', prefix + 'box_loss', prefix + 'center_loss']
+        for x, tag in zip(list(loss_mean), tags):
+            tb_writer.add_scalar(tag, x, epoch)
+        tb_writer.flush()
 
 
 def train(epoch, loader, model, optimizer, device):
     model.train()
-
-    # if get_rank() == 0:
     pbar = tqdm(loader, dynamic_ncols=True)
 
-    # else:
-    #     pbar = loader
+    loss_mean = torch.zeros(4)
 
     for batch_nr, (images, targets, _) in enumerate(pbar):
         model.zero_grad()  # alle Gradienten auf 0 sonst werden diese akkumuliert aus vorherigem batch
@@ -101,26 +133,30 @@ def train(epoch, loader, model, optimizer, device):
         nn.utils.clip_grad_norm_(model.parameters(), 10)
         optimizer.step()
 
-        # loss_reduced = reduce_loss_dict(loss_dict) # vmtl nur für distributed relevant
-        # loss_cls = loss_reduced['loss_cls'].mean().item()
-        # loss_box = loss_reduced['loss_box'].mean().item()
-        # loss_center = loss_reduced['loss_center'].mean().item()
+        loss_mean[0] = (batch_nr * loss_mean[0] + loss) / (batch_nr + 1)
+        loss_mean[1] = (batch_nr * loss_mean[1] + loss_cls) / (batch_nr + 1)
+        loss_mean[2] = (batch_nr * loss_mean[2] + loss_box) / (batch_nr + 1)
+        loss_mean[3] = (batch_nr * loss_mean[3] + loss_center) / (batch_nr + 1)
 
-        # if get_rank() == 0:
         pbar.set_description(
             (
-                f'epoch: {epoch + 1}; cls: {loss_cls:.4f}; '
+                f'epoch: {epoch}; cls: {loss_cls:.4f}; '
                 f'box: {loss_box:.4f}; center: {loss_center:.4f}'
             )
         )
-        # with open("loss_logging.txt", 'a') as loss_file:  # debugging nan fehler
-        #     loss_file.writelines(
-        #         f"loss: {loss:.4f} at epoch: {epoch}, batch {batch_nr} | loss_cls: {loss_cls:.4f} loss_box: {loss_box:.4f} loss_center: {loss_center:.4f}\n")
+    if tb_writer:
+        tags = ['train/loss', 'train/cls_loss', 'train/box_loss', 'train/center_loss']
+        for x, tag in zip(list(loss_mean), tags):
+            tb_writer.add_scalar(tag, x, epoch)
+        tb_writer.flush()
+
+    if epoch == opt.epochs - 1:
+        valid(loader, None, model, device, val=False)  # evaluation (metrics) der trainingsdaten
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=35)  # 500200 batches at bs 16, 117263 COCO images = 273 epochs
+    parser.add_argument('--epochs', type=int, default=50)  # 500200 batches at bs 16, 117263 COCO images = 273 epochs
     parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
     parser.add_argument('--data', type=str, default='data/radar.data', help='*.data path')
     parser.add_argument('--resume', action='store_true', help='resume training from last.pt')
@@ -148,6 +184,8 @@ if __name__ == "__main__":
     data = opt.data
     epochs = opt.epochs
     batch_size = opt.batch_size
+
+    tb_writer = SummaryWriter()
 
     init_seeds()  # eventuell raus lassen später?
     data_dict = parse_data_cfg(data)
@@ -188,14 +226,6 @@ if __name__ == "__main__":
         optimizer, milestones=[16, 22], gamma=0.1
     )
 
-    # if args.distributed:
-    #     model = nn.parallel.DistributedDataParallel(
-    #         model,
-    #         device_ids=[args.local_rank],
-    #         output_device=args.local_rank,
-    #         broadcast_buffers=False,
-    #     )
-
     for epoch in range(opt.epochs):
         train(epoch, train_loader, model, optimizer, device)
         valid(valid_loader, valid_set, model, device)
@@ -203,7 +233,7 @@ if __name__ == "__main__":
         scheduler.step()
         # if get_rank() == 0:
 
-        # torch.save(
-        #     {'model': model.module.state_dict(), 'optim': optimizer.state_dict()},
-        #     f'checkpoint/epoch-{epoch + 1}.pt',
-        # )
+        torch.save(
+            {'model': model.state_dict(), 'optim': optimizer.state_dict()},
+            f'checkpoint/epoch-{epoch + 1}.pt',
+        )
