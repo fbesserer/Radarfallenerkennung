@@ -249,14 +249,17 @@ class EmbeddedYolo(nn.Module):
         super().__init__()
 
         self.backbone = Backbone()
+
+        print("backbone params (all):" + str(sum(p.numel() for p in self.backbone.parameters())))
         self.neck = Neck()
+        print("neck params (all):" + str(sum(p.numel() for p in self.neck.parameters())))
         self.head = Head()
         self.fpn_strides = [8, 16, 32]
         self.loss = FCOSLoss(
             self.fpn_strides
         )
         self.postprocessor = FCOSPostprocessor(
-            opt.threshold,
+            opt.conf_threshold,
             opt.top_n,
             opt.nms_threshold,
             opt.post_top_n,
@@ -273,11 +276,10 @@ class EmbeddedYolo(nn.Module):
     #
     #     self.apply(freeze_bn)
 
-    def forward(self, input, image_sizes=None, targets=None):
+    def forward(self, input, image_sizes=None, targets=None, detection=False):
         features = self.backbone(input)
         features = self.neck(features)
         cls_pred, box_pred, center_pred = self.head(features)
-        # print(cls_pred, box_pred, center_pred)
         location = self.compute_location(features)
 
         if self.training:
@@ -296,6 +298,9 @@ class EmbeddedYolo(nn.Module):
             boxes = self.postprocessor(
                 location, cls_pred, box_pred, center_pred, image_sizes
             )
+            if detection:
+                return boxes, None
+
             loss_cls, loss_box, loss_center = self.loss(
                 location, cls_pred, box_pred, center_pred, targets
             )
@@ -341,13 +346,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     opt = parser.parse_args()
     opt.n_class = 5
-    opt.threshold = 0.05
+    opt.conf_threshold = 0.05
     opt.top_n = 1000
     opt.nms_threshold = 0.6
     opt.post_top_n = 100
     opt.min_size = 0
     model = EmbeddedYolo(opt).to(device)
-    print(model)
-    fake_pic = torch.rand(1, 3, 416, 416, device=device)
-    logits = model(fake_pic)
+    # print(model)
+
+    print(sum(p.numel() for p in model.parameters() if p.requires_grad))
+    print(sum(p.numel() for p in model.parameters()))
+    # fake_pic = torch.rand(1, 3, 416, 416, device=device)
+    # logits = model(fake_pic)
     # print(logits.shape)

@@ -1,4 +1,5 @@
 import argparse
+import sys
 from typing import List, Any, Dict
 import time
 
@@ -48,7 +49,7 @@ def format_pred(preds: List[BoxTarget]) -> List[Dict[str, Tensor]]:
 
 
 @torch.no_grad()
-def valid(loader, valid_set, model, device, val=True):
+def valid(loader, valid_set, model, device, val=True, test=False):
     torch.cuda.empty_cache()
     model.eval()
     pbar = tqdm(loader, dynamic_ncols=True)
@@ -98,6 +99,7 @@ def valid(loader, valid_set, model, device, val=True):
     if tb_writer:
         # metrics
         prefix = "val/" if val else "train/"
+        prefix = "test/" if test else prefix
         metrics: List = sorted(metrics.items(), key=lambda x: x[0])
         tags = [prefix + key[0] for key in metrics]
         tensors = [val[1] for val in metrics]
@@ -163,18 +165,19 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=0.01)
     parser.add_argument('--l2', type=float, default=0.0001)
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
-    parser.add_argument('--notest', action='store_true', help='only test final epoch')
+    # parser.add_argument('--notest', action='store_true', help='only test final epoch')
+    parser.add_argument('--test', action='store_true', help='evaluate test data')
     parser.add_argument('--evolve', action='store_true', help='evolve hyperparameters')
     parser.add_argument('--cache-images', action='store_true', help='cache images for faster training')
-    parser.add_argument('--weights', type=str, default='weights/yolov4-tiny.weights', help='initial weights path')
+    parser.add_argument('--weights', type=str, default='checkpoint/yolov4-tiny.weights', help='initial weights path')
     parser.add_argument('--name', default='', help='renames results.txt to results_name.txt if supplied')
     parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
     parser.add_argument('--adam', action='store_true', help='use adam optimizer')
     opt = parser.parse_args()
     opt.n_class = 5
-    opt.threshold = 0.05
+    opt.conf_threshold = 0.05  # object confidence threshold
     opt.top_n = 1000
-    opt.nms_threshold = 0.6
+    opt.nms_threshold = 0.6  # iou threshold
     opt.post_top_n = 100
     opt.min_size = 0
 
@@ -191,9 +194,11 @@ if __name__ == "__main__":
     data_dict = parse_data_cfg(data)
     train_path = data_dict['train']
     valid_path = data_dict['valid']
+    test_path = data_dict['test']
 
     train_set = ImagesAndLabels(train_path, cache_images=opt.cache_images)
     valid_set = ImagesAndLabels(valid_path)
+    test_set = ImagesAndLabels(test_path)
     batch_size = min(batch_size, len(train_set))
     train_loader = DataLoader(
         train_set,
@@ -211,8 +216,16 @@ if __name__ == "__main__":
         num_workers=0,
         collate_fn=collate_fn(),
     )
+    test_loader = DataLoader(
+        test_set,
+        batch_size=batch_size,
+        num_workers=0,
+        collate_fn=collate_fn()
+    )
 
     model = EmbeddedYolo(opt)
+    if opt.test:
+        model.load_state_dict(torch.load(opt.weights)['model'])
     model = model.to(device)
 
     optimizer = optim.SGD(
@@ -222,12 +235,21 @@ if __name__ == "__main__":
         weight_decay=opt.l2,
         nesterov=True,
     )
+    # optimizer = optim.Adam(
+    #     model.parameters(),
+    #     # lr=opt.lr, # versuch mit default Werten
+    #     # weight_decay=opt.l2,
+    # )
     scheduler = optim.lr_scheduler.MultiStepLR(
         optimizer, milestones=[16, 22], gamma=0.1
     )
+    if opt.test:
+        epoch = 0
+        valid(test_loader, None, model, device, test=True)
+        sys.exit()
 
     for epoch in range(opt.epochs):
-        train(epoch, train_loader, model, optimizer, device)
+        # train(epoch, train_loader, model, optimizer, device)
         valid(valid_loader, valid_set, model, device)
 
         scheduler.step()

@@ -5,10 +5,10 @@ from boxtargets import BoxTarget, boxlist_nms, remove_small_box, cat_boxlist
 
 
 class FCOSPostprocessor(nn.Module):
-    def __init__(self, threshold, top_n, nms_threshold, post_top_n, min_size, n_class):
+    def __init__(self, conf_threshold, top_n, nms_threshold, post_top_n, min_size, n_class):
         super().__init__()
 
-        self.threshold = threshold
+        self.threshold = conf_threshold
         self.top_n = top_n
         self.nms_threshold = nms_threshold
         self.post_top_n = post_top_n
