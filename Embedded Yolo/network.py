@@ -33,9 +33,9 @@ class SqueezeExcitation(nn.Module):
         self.n: int = height_width
 
         self.global_avg_pool = nn.AvgPool2d(self.n)
-        self.dense1 = nn.Linear(self.channels, self.channels // self.ratio, bias=False)
+        self.dense1 = nn.Linear(self.channels, self.channels // self.ratio, bias=False)  # mal True ausprobieren
         self.relu = nn.ReLU()
-        self.dense2 = nn.Linear(self.channels // self.ratio, self.channels, bias=False)
+        self.dense2 = nn.Linear(self.channels // self.ratio, self.channels, bias=False)  # mal True ausprobieren
         self.hardswish = nn.Hardswish()
 
     def forward(self, x: Tensor) -> Tensor:  # x = BN ReLU Block
@@ -111,7 +111,8 @@ class SPP(nn.Module):
         self.maxpool13 = nn.MaxPool2d(kernel_size=13, stride=1, padding=13 // 2)
 
     def forward(self, x):
-        # spielt die Reihenfolge eine Rolle?
+        # spielt die Reihenfolge eine Rolle? in der offiziellen tf Umsetzung ist es umgekehrt (13 - 1)
+        # return torch.cat((x, self.maxpool5(x), self.maxpool9(x), self.maxpool13(x)), dim=1)
         return torch.cat((self.maxpool13(x), self.maxpool9(x), self.maxpool5(x), x), dim=1)
 
 
@@ -119,11 +120,16 @@ class Backbone(nn.Module):
     def __init__(self):
         super(Backbone, self).__init__()
         asu = AttentiveShuffleNetUnit
-        stages_repeats = [3, 7, 3]  # oder 4,8,4 wie im ShuffleNetv2?
+        stages_repeats = [4, 8, 4]
         self._stage_out_channels = [116, 232, 464]
         self.height_width = [52, 26, 13]
 
-        self.conv1 = nn.Conv2d(3, 24, kernel_size=3, stride=2)  # bias = False? laut shufflenetv2 repo
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(3, 24, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(24),
+            nn.ReLU(inplace=True),
+        )
+        # self.conv1 = nn.Conv2d(3, 24, kernel_size=3, stride=2)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2)  # laut EY paper keine BN und relu Schicht hier
 
         input_channels = 24
@@ -208,11 +214,17 @@ class Neck(nn.Module):
 class Head(nn.Module):
     def __init__(self):
         super(Head, self).__init__()
-        self.head = nn.Sequential(
+        self.head = nn.Sequential(  # depthwise separable convs
             nn.Conv2d(96, 96, kernel_size=5, stride=1, padding=2, groups=96),
             nn.Conv2d(96, 96, kernel_size=1, stride=1),
+            # GN und Relu nicht explizit erwähnt aber übernommen aus FCOS und anderen Umsetzungen
+            nn.GroupNorm(8, 96),
+            nn.ReLU(inplace=True),
             nn.Conv2d(96, 96, kernel_size=5, stride=1, padding=2, groups=96),
             nn.Conv2d(96, 96, kernel_size=1, stride=1),
+            # GN und Relu nicht explizit erwähnt aber übernommen aus FCOS und anderen Umsetzungen
+            nn.GroupNorm(8, 96),
+            nn.ReLU(inplace=True),
             nn.Conv2d(96, 9, kernel_size=1, stride=1)  # 4 classes + 4 Bbox-Werte + 1 centerness
         )
 
@@ -225,19 +237,21 @@ class Head(nn.Module):
         output1 = self.head(output[0])
         assert output1.shape[1:] == torch.Size([9, 52, 52])
         logits.append(output1[:, 0:4, :, :])
-        bboxes.append(output1[:, 4:8, :, :])
+        # test = output1[:, 4:8, :, :]
+        # test1 = torch.exp(output1[:, 4:8, :, :])
+        bboxes.append(torch.exp(output1[:, 4:8, :, :]))
         centers.append(output1[:, 8:, :, :])
 
         output2 = self.head(output[1])
         assert output2.shape[1:] == torch.Size([9, 26, 26])
         logits.append(output2[:, 0:4, :, :])
-        bboxes.append(output2[:, 4:8, :, :])
+        bboxes.append(torch.exp(output2[:, 4:8, :, :]))
         centers.append(output2[:, 8:, :, :])
 
         output3 = self.head(output[2])
         assert output3.shape[1:] == torch.Size([9, 13, 13])
         logits.append(output3[:, 0:4, :, :])
-        bboxes.append(output3[:, 4:8, :, :])
+        bboxes.append(torch.exp(output3[:, 4:8, :, :]))
         centers.append(output3[:, 8:, :, :])
 
         return logits, bboxes, centers
@@ -249,11 +263,21 @@ class EmbeddedYolo(nn.Module):
         super().__init__()
 
         self.backbone = Backbone()
-
-        print("backbone params (all):" + str(sum(p.numel() for p in self.backbone.parameters())))
+        # for name, param in self.backbone.named_parameters():
+        #     if param.requires_grad:
+        #         print(name, param.numel())
+        # print("backbone params (all):" + str(sum(p.numel() for p in self.backbone.parameters())))
         self.neck = Neck()
-        print("neck params (all):" + str(sum(p.numel() for p in self.neck.parameters())))
+        # for name, param in self.neck.named_parameters():
+        #     if param.requires_grad:
+        #         print(name, param.numel())
+        # print("neck params (all):" + str(sum(p.numel() for p in self.neck.parameters())))
         self.head = Head()
+        # for name, param in self.head.named_parameters():
+        #     if param.requires_grad:
+        #         print(name, param.numel())
+        # print("head params (all):" + str(sum(p.numel() for p in self.head.parameters())))
+
         self.fpn_strides = [8, 16, 32]
         self.loss = FCOSLoss(
             self.fpn_strides
@@ -356,6 +380,6 @@ if __name__ == "__main__":
 
     print(sum(p.numel() for p in model.parameters() if p.requires_grad))
     print(sum(p.numel() for p in model.parameters()))
-    # fake_pic = torch.rand(1, 3, 416, 416, device=device)
-    # logits = model(fake_pic)
+    fake_pic = torch.rand(1, 3, 416, 416, device=device)
+    logits = model(fake_pic)
     # print(logits.shape)
