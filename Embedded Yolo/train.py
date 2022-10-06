@@ -167,6 +167,7 @@ if __name__ == "__main__":
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
     # parser.add_argument('--notest', action='store_true', help='only test final epoch')
     parser.add_argument('--test', action='store_true', help='evaluate test data')
+    parser.add_argument('--load_weights', action='store_true', help='load weights')
     parser.add_argument('--evolve', action='store_true', help='evolve hyperparameters')
     parser.add_argument('--cache-images', action='store_true', help='cache images for faster training')
     parser.add_argument('--weights', type=str, default='checkpoint/yolov4-tiny.weights', help='initial weights path')
@@ -224,7 +225,7 @@ if __name__ == "__main__":
     )
 
     model = EmbeddedYolo(opt)
-    if opt.test:
+    if opt.test or opt.load_weights:
         model.load_state_dict(torch.load(opt.weights)['model'])
     model = model.to(device)
 
@@ -249,7 +250,7 @@ if __name__ == "__main__":
         sys.exit()
 
     for epoch in range(opt.epochs):
-        # train(epoch, train_loader, model, optimizer, device)
+        train(epoch, train_loader, model, optimizer, device)
         valid(valid_loader, valid_set, model, device)
 
         scheduler.step()

@@ -53,6 +53,8 @@ class IOULoss(nn.Module):
             loss = 1 - gious
 
         if weight is not None and weight.sum() > 0:
+            if (loss * weight).sum() / weight.sum() < 0:  # entfernen
+                print(9)
             return (loss * weight).sum() / weight.sum()
 
         else:
@@ -84,7 +86,7 @@ class SigmoidFocalLoss(nn.Module):
 
         gamma: float = self.gamma
         alpha: float = self.alpha
-        eps: float = 1e-30
+        eps: float = 1e-8
         term1: Tensor = (1 - p) ** gamma * torch.log(p + eps)
         term2: Tensor = p ** gamma * torch.log(1 - p + eps)
 
@@ -172,8 +174,8 @@ class FCOSLoss(nn.Module):
 
         # pos_id: Tensor = torch.nonzero(labels_flat > 0).squeeze(1)
         pos_id: Tensor = torch.nonzero(labels_flat).squeeze(1)
-
-        cls_loss: Tensor = self.cls_loss(cls_flat, labels_flat.int()) / (pos_id.numel() + batch)
+        n_pos = max(pos_id.numel(), 1)
+        cls_loss: Tensor = self.cls_loss(cls_flat, labels_flat.int()) / n_pos
 
         box_flat = box_flat[pos_id]
         center_flat = center_flat[pos_id]
