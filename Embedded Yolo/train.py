@@ -157,6 +157,7 @@ def train(epoch, loader, model, optimizer, device):
 
 
 if __name__ == "__main__":
+    # zum testen: --test --weights checkpoint\training_synth\epoch-17.pt
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=50)  # 500200 batches at bs 16, 117263 COCO images = 273 epochs
     parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64

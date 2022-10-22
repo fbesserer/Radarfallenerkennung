@@ -52,7 +52,7 @@ class IOULoss(nn.Module):
                     torch.isnan(gious)] = 0  # passiert, wenn die predictions so große zahlen liefern, dass area == inf
             loss = 1 - gious
 
-        if weight is not None and weight.sum() > 0:
+        if weight is not None and weight.sum() > 0:  # weight sind center targets
             if (loss * weight).sum() / weight.sum() < 0:  # entfernen
                 print(9)
             return (loss * weight).sum() / weight.sum()

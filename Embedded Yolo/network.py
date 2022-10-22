@@ -6,12 +6,9 @@ from torch.nn import functional
 from loss import FCOSLoss
 from postprocess import FCOSPostprocessor
 
-# device = "cuda" if torch.cuda.is_available() else "cpu"
-# print(f"Using {device} device")
-device = "cpu"
-
 
 def channel_shuffle(x: Tensor, groups: int) -> Tensor:
+    """ Durchmischen entlang der Channeldimension """
     batchsize, num_channels, height, width = x.data.size()
     channels_per_group = num_channels // groups
 
@@ -33,12 +30,12 @@ class SqueezeExcitation(nn.Module):
         self.n: int = height_width
 
         self.global_avg_pool = nn.AvgPool2d(self.n)
-        self.dense1 = nn.Linear(self.channels, self.channels // self.ratio, bias=False)  # mal True ausprobieren
+        self.dense1 = nn.Linear(self.channels, self.channels // self.ratio, bias=False)
         self.relu = nn.ReLU()
-        self.dense2 = nn.Linear(self.channels // self.ratio, self.channels, bias=False)  # mal True ausprobieren
+        self.dense2 = nn.Linear(self.channels // self.ratio, self.channels, bias=False)
         self.hardswish = nn.Hardswish()
 
-    def forward(self, x: Tensor) -> Tensor:  # x = BN ReLU Block
+    def forward(self, x: Tensor) -> Tensor:
         block: Tensor = x
         x = self.global_avg_pool(x)
         x = x.view(x.shape[0], self.channels)
@@ -55,12 +52,12 @@ class AttentiveShuffleNetUnit(nn.Module):
 
         if not (1 <= stride <= 3):
             raise ValueError('illegal stride value')
-        self.stride = stride  # basic unit (stride = 1) or unit for spatial down sampling (stride=2)
+        self.stride = stride  # stride = 1 (basic unit) oder stride = 2 (spatial down sampling)
 
         branch_features = out_channel // 2
         assert (self.stride != 1) or (in_channel == branch_features << 1)
 
-        if self.stride > 1:
+        if self.stride > 1:  # Spatial Down Sampling zu Beginn jedes ASU Blockes
             self.branch1 = nn.Sequential(
                 self.depthwise_conv(in_channel, in_channel, kernel_size=3, stride=self.stride, padding=1),
                 nn.BatchNorm2d(in_channel),
@@ -69,7 +66,7 @@ class AttentiveShuffleNetUnit(nn.Module):
                 nn.ReLU(inplace=True),
             )
         else:
-            self.branch1 = nn.Sequential()  # why? vmtl nur für die model() Ausgabe
+            self.branch1 = nn.Sequential()
 
         self.branch2 = nn.Sequential(
             nn.Conv2d(in_channel if (self.stride > 1) else branch_features,
@@ -111,12 +108,11 @@ class SPP(nn.Module):
         self.maxpool13 = nn.MaxPool2d(kernel_size=13, stride=1, padding=13 // 2)
 
     def forward(self, x):
-        # spielt die Reihenfolge eine Rolle? in der offiziellen tf Umsetzung ist es umgekehrt (13 - 1)
-        # return torch.cat((x, self.maxpool5(x), self.maxpool9(x), self.maxpool13(x)), dim=1)
         return torch.cat((self.maxpool13(x), self.maxpool9(x), self.maxpool5(x), x), dim=1)
 
 
 class Backbone(nn.Module):
+    # ASU-SPP Network
     def __init__(self):
         super(Backbone, self).__init__()
         asu = AttentiveShuffleNetUnit
@@ -124,14 +120,15 @@ class Backbone(nn.Module):
         self._stage_out_channels = [116, 232, 464]
         self.height_width = [52, 26, 13]
 
+        # Eingangsfaltungs- und Max Pooling Schicht
         self.conv1 = nn.Sequential(
             nn.Conv2d(3, 24, kernel_size=3, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(24),
             nn.ReLU(inplace=True),
         )
-        # self.conv1 = nn.Conv2d(3, 24, kernel_size=3, stride=2)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2)  # laut EY paper keine BN und relu Schicht hier
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2)
 
+        # Erstellung von 3 ASU Blöcken
         input_channels = 24
         stage_names = [f'stage{i}' for i in [2, 3, 4]]
         spp_names = [f'spp{i}' for i in range(2, 5)]
@@ -147,7 +144,6 @@ class Backbone(nn.Module):
             input_channels = output_channels
 
     def forward(self, x: Tensor) -> Tuple[Tensor, ...]:
-        # ASU-SPP Network - backbone
         x = self.conv1(x)
         x = self.maxpool(x)
         x = self.stage2(x)
@@ -161,21 +157,20 @@ class Backbone(nn.Module):
         x = self.stage4(x)
         spp4: Tensor = self.spp4(x)
         assert spp4.shape[1:] == torch.Size([1856, 13, 13])
-        assert x.shape[1:] == torch.Size([464, 13, 13])
 
         return spp2, spp3, spp4
 
 
 class Neck(nn.Module):
+    # PANet-Tiny
     def __init__(self):
         super(Neck, self).__init__()
 
-        self.neck52_conv = nn.Conv2d(464, 96, kernel_size=1, stride=1)  # Bn und ReLU?
+        self.neck52_conv = nn.Conv2d(464, 96, kernel_size=1, stride=1)
         self.neck26_conv = nn.Conv2d(928, 96, kernel_size=1, stride=1)
         self.neck13_conv = nn.Conv2d(1856, 96, kernel_size=1, stride=1)
 
     def forward(self, spp: Tuple[Tensor, ...]) -> Tuple[Tensor, ...]:
-        # PANet-Tiny - neck
         # neck52 N x 96 x 52 x 52
         neck52 = self.neck52_conv(spp[0])
         # neck26 N x 96 x 26 x 26
@@ -212,33 +207,33 @@ class Neck(nn.Module):
 
 
 class Head(nn.Module):
+    # Tiny-Head
     def __init__(self):
         super(Head, self).__init__()
-        self.head = nn.Sequential(  # depthwise separable convs
+        self.head = nn.Sequential(
+            # 2 depthwise separable Convs
             nn.Conv2d(96, 96, kernel_size=5, stride=1, padding=2, groups=96),
             nn.Conv2d(96, 96, kernel_size=1, stride=1),
-            # GN und Relu nicht explizit erwähnt aber übernommen aus FCOS und anderen Umsetzungen
+            # GN und Relu nicht explizit erwähnt aber übernommen aus FCOS, verbessert Ergebnis
             nn.GroupNorm(8, 96),
             nn.ReLU(inplace=True),
             nn.Conv2d(96, 96, kernel_size=5, stride=1, padding=2, groups=96),
             nn.Conv2d(96, 96, kernel_size=1, stride=1),
-            # GN und Relu nicht explizit erwähnt aber übernommen aus FCOS und anderen Umsetzungen
+            # GN und Relu nicht explizit erwähnt aber übernommen aus FCOS, verbessert Ergebnis
             nn.GroupNorm(8, 96),
             nn.ReLU(inplace=True),
-            nn.Conv2d(96, 9, kernel_size=1, stride=1)  # 4 classes + 4 Bbox-Werte + 1 centerness
+            # 4 Klassen + 4 Bbox-Werte + 1 Centerness Wert je Feature Map Zelle
+            nn.Conv2d(96, 9, kernel_size=1, stride=1)
         )
 
     def forward(self, output: Tensor) -> Tuple[List[Tensor], List[Tensor], List[Tensor]]:
-        # tiny-head
         logits = []
         bboxes = []
         centers = []
-        # split up head into class, bboxes and centerness
+        # aufteilen in class, bboxes and centerness
         output1 = self.head(output[0])
         assert output1.shape[1:] == torch.Size([9, 52, 52])
         logits.append(output1[:, 0:4, :, :])
-        # test = output1[:, 4:8, :, :]
-        # test1 = torch.exp(output1[:, 4:8, :, :])
         bboxes.append(torch.exp(output1[:, 4:8, :, :]))
         centers.append(output1[:, 8:, :, :])
 
@@ -263,20 +258,8 @@ class EmbeddedYolo(nn.Module):
         super().__init__()
 
         self.backbone = Backbone()
-        # for name, param in self.backbone.named_parameters():
-        #     if param.requires_grad:
-        #         print(name, param.numel())
-        # print("backbone params (all):" + str(sum(p.numel() for p in self.backbone.parameters())))
         self.neck = Neck()
-        # for name, param in self.neck.named_parameters():
-        #     if param.requires_grad:
-        #         print(name, param.numel())
-        # print("neck params (all):" + str(sum(p.numel() for p in self.neck.parameters())))
         self.head = Head()
-        # for name, param in self.head.named_parameters():
-        #     if param.requires_grad:
-        #         print(name, param.numel())
-        # print("head params (all):" + str(sum(p.numel() for p in self.head.parameters())))
 
         self.fpn_strides = [8, 16, 32]
         self.loss = FCOSLoss(
@@ -290,15 +273,6 @@ class EmbeddedYolo(nn.Module):
             opt.min_size,
             opt.n_class,
         )
-
-    # def train(self, mode=True):
-    #     super().train(mode)
-    #
-    #     def freeze_bn(module):
-    #         if isinstance(module, nn.BatchNorm2d):
-    #             module.eval()
-    #
-    #     self.apply(freeze_bn)
 
     def forward(self, input, image_sizes=None, targets=None, detection=False):
         features = self.backbone(input)
@@ -324,7 +298,7 @@ class EmbeddedYolo(nn.Module):
             )
             if detection:
                 return boxes, None
-
+            # Test Loss für Metriken
             loss_cls, loss_box, loss_center = self.loss(
                 location, cls_pred, box_pred, center_pred, targets
             )
@@ -337,10 +311,10 @@ class EmbeddedYolo(nn.Module):
             return boxes, losses
 
     def compute_location(self, features):
-        # Koordinatenberechnung der Mittelpunkte der Feature Map Grid Zellen (in Pixel bezogen auf Ursprungsbild)
+        """ Koordinatenberechnung der Mittelpunkte der Feature Map Grid Zellen (in Pixel bezogen auf Ursprungsbild) """
         locations = []
-
-        for i, feat in enumerate(features):  # größte bis kleinste feature map
+        # größte bis kleinste feature map
+        for i, feat in enumerate(features):
             _, _, height, width = feat.shape
             location_per_level = self.compute_location_per_level(
                 height, width, self.fpn_strides[i], feat.device
@@ -375,6 +349,7 @@ if __name__ == "__main__":
     opt.nms_threshold = 0.6
     opt.post_top_n = 100
     opt.min_size = 0
+    device = 'cpu'
     model = EmbeddedYolo(opt).to(device)
     # print(model)
 
