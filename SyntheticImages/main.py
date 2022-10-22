@@ -12,9 +12,10 @@ import cv2
 from fg_pipeline import FGExecutor, Foreground
 from bg_pipeline import BGExecutor, Background, bounding_box
 
-INITDIR_FG = "F:\\RadarProjekt\\Synthetische Bilder\\freigestellte Blitzer"
+INITDIR_FG = "F:\\RadarProjekt\\Synthetische Bilder\\freigestellte Objekte"
 # INITDIR_BG = "F:\\RadarProjekt\\Training\\Training"
-INITDIR_BG = "F:\\RadarProjekt\\Synthetische Bilder\\backgrounds"
+INITDIR_BG = r"F:\RadarProjekt\Training\Training"
+INITDIR_SAVE = "F:\\RadarProjekt\\Synthetische Bilder\\generatedPics"
 PIXELS = 416
 
 ForegroundSize: namedtuple = namedtuple("ForegroundSize", ["height", "width"])
@@ -38,11 +39,14 @@ class Executor:
         self.save_path = save_path
 
     def execute(self):
+        i: int = 0
         while not self.foregrounds.empty():
             ImageCombinator(self.foregrounds.get(), self.backgrounds.get(), self.save_path,
                             self.distractor_objects).fuse_images()
-            print(self.foregrounds.unfinished_tasks)
-            print(self.backgrounds.unfinished_tasks)
+            print(i)
+            i += 1
+            # print(f" foreground unfinished tasks: {self.foregrounds.unfinished_tasks}")
+            # print(f" background unfinished tasks: {self.backgrounds.unfinished_tasks}")
 
 
 class ImageCombinator:
@@ -56,7 +60,8 @@ class ImageCombinator:
     def fuse_images(self) -> None:
         # if np.random.randint(0, 10) < 2:
         #     self.truncate_foreground()
-        combined_images = self.combine_fg_with_bg()
+        combined_images: List[CombinedImage] = self.combine_fg_with_bg()
+
         # insert distractor in 50% of all cases
         if np.random.randint(0, 10) < 5:
             self.add_distractor_object(combined_images)
@@ -89,9 +94,10 @@ class ImageCombinator:
         self.foreground.binaries = self.foreground.binaries[y1:y2, x1:x2]
 
     def combine_fg_with_bg(self, truncate: bool = False) -> List[CombinedImage]:
-        # todo: break einbauen, falls ein fg mal tatsächlich nicht eingefügt werden kann?
+        # todo: break einbauen, falls ein fg mal tatsächlich nicht eingefügt werden kann? - probiert 1000 mal
         images: List[CombinedImage] = []
-        while True:
+        tries = 0
+        while True and tries < 1000:
             fgsize: ForegroundSize = ForegroundSize(self.foreground.binaries.shape[0],
                                                     self.foreground.binaries.shape[1])
             if truncate:  # todo: implement truncate functionality
@@ -102,7 +108,7 @@ class ImageCombinator:
                 fg_position_x_in_bg: int = np.random.randint(0, PIXELS - fgsize.width)
                 fg_position_y_in_bg: int = np.random.randint(0, PIXELS - fgsize.height)
 
-            # max 75% overlap
+            # max 75% overlap with existing radar trap
             if self.overlap(self.background, fg_position_x_in_bg, fg_position_y_in_bg, fgsize) < 0.75:
                 # 3 different fusing strategies are individually applied
                 noblur: CombinedImage = self.no_blur(fg_position_x_in_bg, fg_position_y_in_bg)
@@ -122,6 +128,8 @@ class ImageCombinator:
 
                 images.extend([noblur, gauss, poiss])
                 break
+
+            tries += 1
         return images
 
     def no_blur(self, fg_position_x_in_bg: int, fg_position_y_in_bg: int) -> CombinedImage:
@@ -193,8 +201,9 @@ class ImageCombinator:
             fg_position_y_in_bg: int = np.random.randint(0, PIXELS - fgsize.height)
             # no overlap
             if self.overlap(noblur, fg_position_x_in_bg, fg_position_y_in_bg, fgsize) == 0:
-                # noblur etc zufällig auswählen
+                # blending zufällig auswählen
                 i = np.random.randint(0, 3)
+                # no blur
                 if i == 0:
                     self.distractor_nonblured(distractor_image, noblur, fg_position_x_in_bg, fg_position_y_in_bg)
                     self.distractor_nonblured(distractor_image, gauss, fg_position_x_in_bg, fg_position_y_in_bg)
@@ -216,8 +225,12 @@ class ImageCombinator:
                 # rescale distractor if too large
                 print("rescaling distractor")
                 tries = 0
+                fgsize_old = fgsize
                 fgsize = ForegroundSize(int(round(fgsize.height * 0.9)),
                                         int(round(fgsize.width * 0.9)))
+                if fgsize_old == fgsize:
+                    # bricht aus while True aus, wenn Radarfalle sich über ganzes Bild erstreckt und daher kein distractor Objekt mehr hinpasst
+                    break
                 distractor_image = cv2.resize(distractor_image, (fgsize.width, fgsize.height),
                                               interpolation=cv2.INTER_AREA)
 
@@ -300,7 +313,7 @@ if __name__ == "__main__":
     source_path_bg = tk.filedialog.askdirectory(initialdir=INITDIR_BG,
                                                 title="Choose source folder of background images")
     source_path_bg += "\\"
-    save_path = tk.filedialog.askdirectory(initialdir=INITDIR_BG,
+    save_path = tk.filedialog.askdirectory(initialdir=INITDIR_SAVE,
                                            title="Choose save folder for synthetically created images")
     save_path += "\\"
 
@@ -308,7 +321,9 @@ if __name__ == "__main__":
         foreground_images: Queue
         distractor_objects: List[Foreground]
         foreground_images, distractor_objects = FGExecutor(source_path_fg).execute()
+        print("fg and distrcator objects loaded...")
         background_images: Queue = BGExecutor(source_path_bg).execute()
+        print("bg objects loaded...")
         Executor(foreground_images, background_images, save_path, distractor_objects).execute()
 
     # bg_test = Background("test", np.zeros((10, 10)), bounding_box_corners=[bounding_box(200, 210, 200, 210)])
