@@ -16,7 +16,7 @@ import cv2
 INITDIR = "F:\\RadarProjekt\\Synthetische Bilder\\backgrounds"
 DEBUG = False
 PIXELS = 416
-NR_TOTAL_IMAGES = 100
+NR_TOTAL_IMAGES = 4_000
 
 bounding_box: namedtuple = namedtuple("bounding_box", ["x1", "x2", "y1", "y2"])
 
@@ -47,7 +47,7 @@ class BGExecutor:
                 if file.name.endswith(".jpg"):
                     dir.append(file.name)
         dir = sorted(dir, key=lambda x: random.random())
-        dir = dir[:NR_TOTAL_IMAGES]
+        dir = dir[:min(len(dir), NR_TOTAL_IMAGES)]
         for file in dir:
             self.source_images.put(file[:-4])
 
