@@ -58,9 +58,12 @@ class Inference(object):
                 of the detection properties can be found in the fields of
                 the BoxList via `prediction.fields()`
         """
-        predictions = self.compute_prediction(image)
+        predictions, inference_time = self.compute_prediction(image)
+        t = time.time()
         top_predictions = self.select_top_predictions(predictions)
         # todo non maxium suppresion umsetzen
+        t = time.time() - t
+        inference_time = inference_time + t
 
         result = image.copy()
         # if self.show_mask_heatmaps:
@@ -72,7 +75,7 @@ class Inference(object):
         #     result = self.overlay_keypoints(result, top_predictions)
         result = self.overlay_class_names(result, top_predictions)
 
-        return result
+        return result, inference_time
 
     def compute_prediction(self, original_image):
         """
@@ -95,8 +98,11 @@ class Inference(object):
         image_list = image_list.to(self.device)
         # compute predictions
         with torch.no_grad():
+            t = time.time()
             predictions = self.model(image_list.tensors, image_list.sizes, detection=True)
-        # predictions = [o.to(self.cpu_device) for o in predictions]
+            t = time.time() - t
+            print(f"time after prediction: {t}")
+            # predictions = [o.to(self.cpu_device) for o in predictions]
 
         # always single image is passed at a time
         prediction = predictions[0][0]
@@ -115,7 +121,7 @@ class Inference(object):
         #     # always single image is passed at a time
         #     masks = self.masker([masks], [prediction])[0]
         #     prediction.add_field("mask", masks)
-        return prediction
+        return prediction, t
 
     def select_top_predictions(self, predictions):
         """
@@ -224,17 +230,22 @@ if __name__ == '__main__':
         confidence_thresholds_for_classes=opt.conf_threshold,
     )
 
+    img_count = 0
+    inf_time = 0
     for im_name in im_names:
         img = cv2.imread(os.path.join(opt.source, im_name))
         if img is None:
             continue
         start_time = time.time()
-        composite = inf_class.run_on_opencv_image(img)
+        composite, inference_time = inf_class.run_on_opencv_image(img)
         print("{}\tinference time: {:.2f}s".format(im_name, time.time() - start_time))
         # todo save all
         cv2.imwrite(os.path.join(opt.output, im_name), composite)
+        img_count += 1
+        inf_time += inference_time
+    print(f"total average (inference + nms) time: {inf_time / img_count}")
 
-        # cv2.imshow(im_name, composite)
+    # cv2.imshow(im_name, composite)
     print("Press any keys to exit ...")
     # cv2.waitKey()
     # cv2.destroyAllWindows()

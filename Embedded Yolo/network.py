@@ -1,3 +1,4 @@
+import time
 from typing import List, Tuple, Any
 
 import torch
@@ -148,15 +149,15 @@ class Backbone(nn.Module):
         x = self.maxpool(x)
         x = self.stage2(x)
         spp2: Tensor = self.spp2(x)
-        assert spp2.shape[1:] == torch.Size([464, 52, 52])
+        # assert spp2.shape[1:] == torch.Size([464, 52, 52])
 
         x = self.stage3(x)
         spp3: Tensor = self.spp3(x)
-        assert spp3.shape[1:] == torch.Size([928, 26, 26])
+        # assert spp3.shape[1:] == torch.Size([928, 26, 26])
 
         x = self.stage4(x)
         spp4: Tensor = self.spp4(x)
-        assert spp4.shape[1:] == torch.Size([1856, 13, 13])
+        # assert spp4.shape[1:] == torch.Size([1856, 13, 13])
 
         return spp2, spp3, spp4
 
@@ -274,8 +275,14 @@ class EmbeddedYolo(nn.Module):
             opt.n_class,
         )
 
+        self.inf_time_bb = 0
+        self.inf_time_pp = 0
+
     def forward(self, input, image_sizes=None, targets=None, detection=False):
+        t = time.perf_counter()
         features = self.backbone(input)
+        self.inf_time_bb += time.perf_counter() - t
+        # print(f"time after backbone: {time.perf_counter() - t}")
         features = self.neck(features)
         cls_pred, box_pred, center_pred = self.head(features)
         location = self.compute_location(features)
@@ -293,9 +300,12 @@ class EmbeddedYolo(nn.Module):
             return None, losses
 
         else:
+            t = time.perf_counter()
             boxes = self.postprocessor(
                 location, cls_pred, box_pred, center_pred, image_sizes
             )
+            self.inf_time_pp += time.perf_counter() - t
+            # print(f"time after postprocessor: {time.perf_counter() - t}")
             if detection:
                 return boxes, None
             # Test Loss für Metriken

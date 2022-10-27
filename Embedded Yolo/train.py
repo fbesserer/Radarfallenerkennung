@@ -58,6 +58,8 @@ def valid(loader, valid_set, model, device, val=True, test=False):
     targets_all: list = []
     loss_mean = torch.zeros(4)
 
+    t = 0
+    image_count = len(loader.dataset.imgs)
     # collect all predictions
     for batch_nr, (images, targets, ids) in enumerate(pbar):
         model.zero_grad()
@@ -68,33 +70,40 @@ def valid(loader, valid_set, model, device, val=True, test=False):
 
         images = images.to(device)
         pred: List[BoxTarget]
-        pred, loss_dict = model(images.tensors, images.sizes, targets=targets)
+        t0 = time.perf_counter()
+        pred, loss_dict = model(images.tensors, images.sizes, targets=targets, detection=test)
+        t += time.perf_counter() - t0
+        # print(time.perf_counter() - t0)
         pred = [p.to('cuda') for p in pred]
         pred: List[Dict[str, Tensor]] = format_pred(pred)
         preds.extend(pred)
 
-        # _, loss_dict = model(images.tensors, targets=targets)
-        loss_cls = loss_dict['loss_cls'].mean()
-        loss_box = loss_dict['loss_box'].mean()
-        loss_center = loss_dict['loss_center'].mean()
-        loss = loss_cls + loss_box + loss_center
+        if not test:
+            # _, loss_dict = model(images.tensors, targets=targets)
+            loss_cls = loss_dict['loss_cls'].mean()
+            loss_box = loss_dict['loss_box'].mean()
+            loss_center = loss_dict['loss_center'].mean()
+            loss = loss_cls + loss_box + loss_center
 
-        loss_mean[0] = (batch_nr * loss_mean[0] + loss) / (batch_nr + 1)
-        loss_mean[1] = (batch_nr * loss_mean[1] + loss_cls) / (batch_nr + 1)
-        loss_mean[2] = (batch_nr * loss_mean[2] + loss_box) / (batch_nr + 1)
-        loss_mean[3] = (batch_nr * loss_mean[3] + loss_center) / (batch_nr + 1)
+            loss_mean[0] = (batch_nr * loss_mean[0] + loss) / (batch_nr + 1)
+            loss_mean[1] = (batch_nr * loss_mean[1] + loss_cls) / (batch_nr + 1)
+            loss_mean[2] = (batch_nr * loss_mean[2] + loss_box) / (batch_nr + 1)
+            loss_mean[3] = (batch_nr * loss_mean[3] + loss_center) / (batch_nr + 1)
 
-        pbar.set_description(
-            (
-                f'epoch: {epoch}; cls: {loss_cls:.4f}; '
-                f'box: {loss_box:.4f}; center: {loss_center:.4f}'
+            pbar.set_description(
+                (
+                    f'epoch: {epoch}; cls: {loss_cls:.4f}; '
+                    f'box: {loss_box:.4f}; center: {loss_center:.4f}'
+                )
             )
-        )
 
     # evaluate all predictions with their respective targets
     start = time.perf_counter()
     metrics: Dict[str, Tensor] = evaluate(preds, targets_all)
     print(f"evaluation time: {round(time.perf_counter() - start, 2)} s")
+    print(f"mean inference time: {t / image_count}s")
+    print(f"mean backbone propagation time: {model.inf_time_bb / image_count}")
+    print(f"mean postprocessing time: {model.inf_time_pp / image_count}")
 
     if tb_writer:
         # metrics
@@ -107,9 +116,10 @@ def valid(loader, valid_set, model, device, val=True, test=False):
             tb_writer.add_scalar(tag, x, epoch)
 
         # losses
-        tags = [prefix + 'loss', prefix + 'cls_loss', prefix + 'box_loss', prefix + 'center_loss']
-        for x, tag in zip(list(loss_mean), tags):
-            tb_writer.add_scalar(tag, x, epoch)
+        if not test:
+            tags = [prefix + 'loss', prefix + 'cls_loss', prefix + 'box_loss', prefix + 'center_loss']
+            for x, tag in zip(list(loss_mean), tags):
+                tb_writer.add_scalar(tag, x, epoch)
         tb_writer.flush()
 
 
@@ -157,7 +167,8 @@ def train(epoch, loader, model, optimizer, device):
 
 
 if __name__ == "__main__":
-    # zum testen: --test --weights checkpoint\training_synth\epoch-17.pt
+    # zum testen: --test --weights checkpoint\training_synth\epoch-17.pt --batch-size 1
+    # train ist für training, validierung und testing gedacht
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=50)  # 500200 batches at bs 16, 117263 COCO images = 273 epochs
     parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
@@ -198,26 +209,28 @@ if __name__ == "__main__":
     valid_path = data_dict['valid']
     test_path = data_dict['test']
 
-    train_set = ImagesAndLabels(train_path, cache_images=opt.cache_images)
-    valid_set = ImagesAndLabels(valid_path)
+    if not opt.test:
+        train_set = ImagesAndLabels(train_path, cache_images=opt.cache_images)
+        valid_set = ImagesAndLabels(valid_path)
+        batch_size = min(batch_size, len(train_set))
+        train_loader = DataLoader(
+            train_set,
+            batch_size=batch_size,
+            shuffle=True,
+            # sampler=data_sampler(train_set, shuffle=True, distributed=args.distributed), # notwendig?
+            num_workers=0,
+            collate_fn=collate_fn(),
+        )
+        valid_loader = DataLoader(
+            valid_set,
+            batch_size=batch_size,
+            # shuffle=True,
+            # sampler=data_sampler(valid_set, shuffle=False, distributed=args.distributed),
+            num_workers=0,
+            collate_fn=collate_fn(),
+        )
     test_set = ImagesAndLabels(test_path)
-    batch_size = min(batch_size, len(train_set))
-    train_loader = DataLoader(
-        train_set,
-        batch_size=batch_size,
-        shuffle=True,
-        # sampler=data_sampler(train_set, shuffle=True, distributed=args.distributed), # notwendig?
-        num_workers=0,
-        collate_fn=collate_fn(),
-    )
-    valid_loader = DataLoader(
-        valid_set,
-        batch_size=batch_size,
-        # shuffle=True,
-        # sampler=data_sampler(valid_set, shuffle=False, distributed=args.distributed),
-        num_workers=0,
-        collate_fn=collate_fn(),
-    )
+
     test_loader = DataLoader(
         test_set,
         batch_size=batch_size,
