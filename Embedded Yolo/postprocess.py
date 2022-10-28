@@ -67,6 +67,7 @@ class FCOSPostprocessor(nn.Module):
             )
 
             height, width = image_sizes[i]
+            # height, width = 416,  # für den Export zu ONNX
 
             boxlist = BoxTarget(detections, (int(width), int(height)), mode='xyxy')
             boxlist.fields['labels'] = class_id
