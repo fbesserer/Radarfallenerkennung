@@ -112,7 +112,8 @@ class FCOSLoss(nn.Module):
     def __init__(self, fpn_strides):
         super().__init__()
 
-        self.sizes = [[-1, 64], [64, 128], [128, 256], [256, 512], [512, 100000000]]  # entspricht mi in paper
+        self.sizes = [[-1, 64], [64, 128],
+                      [128, 100000000]]  # , [256, 512], [512, 100000000]]  # entspricht mi in paper
         self.gamma = 2.0
         self.alpha = 0.25
         self.iou_loss_type = "giou"
