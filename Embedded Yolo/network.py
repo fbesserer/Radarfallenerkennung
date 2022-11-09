@@ -231,7 +231,7 @@ class Head(nn.Module):
         logits = []
         bboxes = []
         centers = []
-        # aufteilen in class, bboxes and centerness
+        # Aufteilen in class, bboxes and centerness
         output1 = self.head(output[0])
         assert output1.shape[1:] == torch.Size([9, 52, 52])
         logits.append(output1[:, 0:4, :, :])

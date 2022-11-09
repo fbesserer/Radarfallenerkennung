@@ -27,6 +27,7 @@ class FCOSPostprocessor(nn.Module):
         center_pred = center_pred.view(batch, 1, height, width).permute(0, 2, 3, 1)
         center_pred = center_pred.reshape(batch, -1).sigmoid()
 
+        # nur Gridzellen deren confidence score über Grenze
         candid_ids = cls_pred > self.threshold
         # sum(1) = reduziere 1. Dim
         top_ns = candid_ids.reshape(batch, -1).sum(1)
@@ -69,7 +70,7 @@ class FCOSPostprocessor(nn.Module):
             height, width = image_sizes[i]
             # height, width = 416,  # für den Export zu ONNX
 
-            boxlist = BoxTarget(detections, (int(width), int(height)), mode='xyxy')
+            boxlist: BoxTarget = BoxTarget(detections, (int(width), int(height)), mode='xyxy')
             boxlist.fields['labels'] = class_id
             boxlist.fields['scores'] = torch.sqrt(cls_p)
             boxlist = boxlist.clip(remove_empty=False)
@@ -80,8 +81,10 @@ class FCOSPostprocessor(nn.Module):
         return results
 
     def forward(self, location, cls_pred, box_pred, center_pred, image_sizes):
+        """ sammelt alle bbox Prädiktionen als BoxTarget Objekte und gibt diese als Liste zurück"""
         boxes = []
 
+        # jede prädiktion todo überprüfen
         for loc, cls_p, box_p, center_p in zip(location, cls_pred, box_pred, center_pred):
             boxes.append(self.forward_single_feature_map(loc, cls_p, box_p, center_p, image_sizes))
 
@@ -92,7 +95,7 @@ class FCOSPostprocessor(nn.Module):
         return boxlists
 
     def select_over_scales(self, boxlists):
-        # selektiert max post_top_n Prädiktionen pro Bild
+        """ selektiert max post_top_n Prädiktionen pro Bild """
         results = []
 
         for boxlist in boxlists:

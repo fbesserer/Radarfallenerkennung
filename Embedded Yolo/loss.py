@@ -52,8 +52,8 @@ class IOULoss(nn.Module):
                     torch.isnan(gious)] = 0  # passiert, wenn die predictions so große zahlen liefern, dass area == inf
             loss = 1 - gious
 
-        if weight is not None and weight.sum() > 0:  # weight sind center targets
-            if (loss * weight).sum() / weight.sum() < 0:  # entfernen
+        if weight is not None and weight.sum() > 0:  # Gewichtung mit Centerness Score
+            if (loss * weight).sum() / weight.sum() < 0:  # todo: entfernen
                 print(9)
             return (loss * weight).sum() / weight.sum()
 
@@ -139,6 +139,7 @@ class FCOSLoss(nn.Module):
         batch: int = cls_pred[0].shape[0]
         n_class: int = cls_pred[0].shape[1]
 
+        # GroundTruth Werte Berechnung auf Gridzellenebene zum Abgleich mit den Prädiktionen
         labels: List[Tensor, ...]
         box_targets: List[Tensor, ...]
         labels, box_targets = self.prepare_target(locations, targets)
@@ -173,7 +174,7 @@ class FCOSLoss(nn.Module):
         labels_flat: Tensor = torch.cat(labels_flat, 0)
         box_targets_flat: Tensor = torch.cat(box_targets_flat, 0)
 
-        # pos_id: Tensor = torch.nonzero(labels_flat > 0).squeeze(1)
+        # pos_id= Indizes aller Grid Zellen die innerhalb eines Objekts liegen
         pos_id: Tensor = torch.nonzero(labels_flat).squeeze(1)
         n_pos = max(pos_id.numel(), 1)
         cls_loss: Tensor = self.cls_loss(cls_flat, labels_flat.int()) / n_pos
@@ -183,19 +184,27 @@ class FCOSLoss(nn.Module):
 
         box_targets_flat = box_targets_flat[pos_id]
 
-        if pos_id.numel() > 0:
+        if pos_id.numel() > 0:  # Objekt(e) vorhanden
             center_targets = self.compute_centerness_targets(box_targets_flat)
 
             box_loss = self.box_loss(box_flat, box_targets_flat, center_targets)
             center_loss = self.center_loss(center_flat, center_targets)
 
-        else:
+        else:  # kein Objekt: box_loss & center_loss ergeben dann leere Tensoren; nur cls_loss wird berücksichtigt
             box_loss = box_flat.sum()
             center_loss = center_flat.sum()
 
         return cls_loss, box_loss, center_loss
 
     def prepare_target(self, points: Tensor, targets: Tensor) -> (Tensor, Tensor):  # points = location
+        """
+        berechnet für jede Gridzelle die Klassenlabels und bounding boxes zum späteren Abgleich mit den Prädiktionen
+        :param points: locations (Mittelpunkte der Gridzellen im Bild)
+        :param targets: BoxTarget Objekt todo überprüfen
+        :return: labels, box targets
+         labels enthält die Gridzellen befüllt mit der entsprechenden Klasse wenn ein Objekt vorhanden ist
+         targets enthält die entsprechenden boundingboxes
+        """
         ex_size_of_interest: List[Tensor, ...] = []
 
         for i, point_per_level in enumerate(points):
@@ -205,6 +214,7 @@ class FCOSLoss(nn.Module):
                 # -1 = dimension 1 wird nicht verändert
             )
 
+        # Zielobjektlabels und bounding boxes für jede Gridzelle berechnen
         ex_size_of_interest: Tensor = torch.cat(ex_size_of_interest, 0)
         n_point_per_level: List[int] = [len(point_per_level) for point_per_level in points]
         point_all = torch.cat(points, dim=0)
@@ -212,6 +222,7 @@ class FCOSLoss(nn.Module):
             point_all, targets, ex_size_of_interest, n_point_per_level
         )
 
+        # Strukturierung und Zusammenfügen der Tensoren
         for i in range(len(label)):
             label[i] = torch.split(label[i], n_point_per_level, 0)
             box_target[i] = torch.split(box_target[i], n_point_per_level, 0)
@@ -231,9 +242,8 @@ class FCOSLoss(nn.Module):
 
         return label_level_first, box_target_level_first
 
-    def compute_target_for_location(
-            self, locations, targets, sizes_of_interest, n_point_per_level
-    ):
+    def compute_target_for_location(self, locations, targets, sizes_of_interest, n_point_per_level):
+        """ Zielobjektlabels und bounding boxes für jede Gridzelle berechnen """
         labels: List = []
         box_targets: List = []
         xs, ys = locations[:, 0], locations[:, 1]
@@ -253,18 +263,19 @@ class FCOSLoss(nn.Module):
             box_targets_per_img = torch.stack([l, t, r, b], 2)
 
             if self.center_sample:
+                # weist nur Zellen nahe dem Zentrum True zu
                 is_in_boxes = self.get_sample_region(
                     bboxes, self.strides, n_point_per_level, xs, ys, radius=self.radius
                 )
 
-            else:
+            else:  # alle Zellen innerhalb der bounding box werden True
                 is_in_boxes = box_targets_per_img.min(2)[0] > 0
 
             max_box_targets_per_img: Tensor = box_targets_per_img.max(dim=2)[0]
 
-            is_cared_in_level = (
-                                        max_box_targets_per_img >= sizes_of_interest[:, [0]]
-                                ) & (max_box_targets_per_img <= sizes_of_interest[:, [1]])
+            # bestimmt welche Feature Map verantwortlich für die jeweiligen Objekte ist
+            is_cared_in_level = (max_box_targets_per_img >= sizes_of_interest[:, [0]]) & \
+                                (max_box_targets_per_img <= sizes_of_interest[:, [1]])
 
             locations_to_gt_area = area[None].repeat(len(locations), 1)
             locations_to_gt_area[is_in_boxes == 0] = INF
@@ -284,6 +295,7 @@ class FCOSLoss(nn.Module):
         return labels, box_targets
 
     def get_sample_region(self, gt, strides, n_point_per_level, xs, ys, radius=1):
+        """ berechnet für einen bestimmten Radius, ob eine Grid Zelle im Zentrum eines Objekts liegt """
         n_gt = gt.shape[0]
         n_loc = len(xs)
         gt = gt[None].expand(n_loc, n_gt, 4)
@@ -297,6 +309,7 @@ class FCOSLoss(nn.Module):
 
         center_gt = gt.new_zeros(gt.shape)
 
+        # berechnet die Zentrumspannweiten der gt bboxes abhängig von der Feature Map Ebene
         for level, n_p in enumerate(n_point_per_level):
             end = begin + n_p
             stride = strides[level] * radius
