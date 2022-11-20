@@ -53,8 +53,8 @@ class IOULoss(nn.Module):
             loss = 1 - gious
 
         if weight is not None and weight.sum() > 0:  # Gewichtung mit Centerness Score
-            if (loss * weight).sum() / weight.sum() < 0:  # todo: entfernen
-                print(9)
+            # if (loss * weight).sum() / weight.sum() < 0:  # debugging
+            #     print()
             return (loss * weight).sum() / weight.sum()
 
         else:
@@ -113,7 +113,7 @@ class FCOSLoss(nn.Module):
         super().__init__()
 
         self.sizes = [[-1, 64], [64, 128],
-                      [128, 100000000]]  # , [256, 512], [512, 100000000]]  # entspricht mi in paper
+                      [128, 256]]  # , [256, 512], [512, 100000000]]  # entspricht mi in paper
         self.gamma = 2.0
         self.alpha = 0.25
         self.iou_loss_type = "giou"

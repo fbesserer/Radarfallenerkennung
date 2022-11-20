@@ -61,7 +61,6 @@ class Inference(object):
         predictions, inference_time = self.compute_prediction(image)
         t = time.time()
         top_predictions = self.select_top_predictions(predictions)
-        # todo non maxium suppresion umsetzen
         t = time.time() - t
         inference_time = inference_time + t
 
@@ -99,7 +98,7 @@ class Inference(object):
         # compute predictions
         with torch.no_grad():
             t = time.time()
-            predictions = self.model(image_list.tensors, image_list.sizes, detection=True)
+            predictions = self.model(image_list.tensors, image_list.sizes, inference=True)
             t = time.time() - t
             print(f"time after prediction: {t}")
             # predictions = [o.to(self.cpu_device) for o in predictions]
@@ -200,9 +199,10 @@ class Inference(object):
 
 
 if __name__ == '__main__':
+    # Kommandozeilenargument Bsp: --weights checkpoint\training_synth\epoch-18.pt
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default='checkpoint/epoch-9.pt', help='weights path')
-    parser.add_argument('--source', type=str, default='data/samples', help='source')  # input file/folder, 0 for webcam
+    parser.add_argument('--source', type=str, default='data/samples', help='source')  # input file/folder
     parser.add_argument('--output', type=str, default='output', help='output folder')  # output folder
     parser.add_argument('--conf-threshold', type=float, default=0.1, help='object confidence threshold')
     parser.add_argument('--nms-threshold', type=float, default=0.5, help='IOU threshold for NMS')
@@ -239,13 +239,12 @@ if __name__ == '__main__':
         start_time = time.time()
         composite, inference_time = inf_class.run_on_opencv_image(img)
         print("{}\tinference time: {:.2f}s".format(im_name, time.time() - start_time))
-        # todo save all
         cv2.imwrite(os.path.join(opt.output, im_name), composite)
         img_count += 1
         inf_time += inference_time
     print(f"total average (inference + nms) time: {inf_time / img_count}")
 
     # cv2.imshow(im_name, composite)
-    print("Press any keys to exit ...")
+    # print("Press any keys to exit ...")
     # cv2.waitKey()
     # cv2.destroyAllWindows()

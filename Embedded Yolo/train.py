@@ -18,9 +18,6 @@ from evaluate import evaluate
 def accumulate_predictions(predictions):
     all_predictions = [predictions]
 
-    # if get_rank() != 0:
-    #     return
-
     predictions = {}
 
     for p in all_predictions:
@@ -71,7 +68,7 @@ def valid(loader, valid_set, model, device, val=True, test=False):
         images = images.to(device)
         pred: List[BoxTarget]
         t0 = time.perf_counter()
-        pred, loss_dict = model(images.tensors, images.sizes, targets=targets, detection=test)
+        pred, loss_dict = model(images.tensors, images.sizes, targets=targets, inference=test)
         t += time.perf_counter() - t0
         # print(time.perf_counter() - t0)
         pred = [p.to('cuda') for p in pred]
@@ -167,25 +164,19 @@ def train(epoch, loader, model, optimizer, device):
 
 
 if __name__ == "__main__":
-    # zum testen: --test --weights checkpoint\training_synth\epoch-17.pt --batch-size 1
-    # train ist für training, validierung und testing gedacht
+    # train wird für training, validierung und testing verwendet
+    # zum Trainieren: default Einstellungen
+    # zum Testen inkl Ausgabe mAP und Latenzzeit (gespeicherte Epochen sind 1 indexiert): --test --weights checkpoint\training_synth_256mMax_Adam\epoch-118.pt --batch-size 1
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=50)  # 500200 batches at bs 16, 117263 COCO images = 273 epochs
-    parser.add_argument('--batch-size', type=int, default=64)  # effective bs = batch_size * accumulate = 16 * 4 = 64
+    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--data', type=str, default='data/radar.data', help='*.data path')
-    parser.add_argument('--resume', action='store_true', help='resume training from last.pt')
     parser.add_argument('--lr', type=float, default=0.01)
     parser.add_argument('--l2', type=float, default=0.0001)
-    parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
-    # parser.add_argument('--notest', action='store_true', help='only test final epoch')
     parser.add_argument('--test', action='store_true', help='evaluate test data')
     parser.add_argument('--load_weights', action='store_true', help='load weights')
-    parser.add_argument('--evolve', action='store_true', help='evolve hyperparameters')
     parser.add_argument('--cache-images', action='store_true', help='cache images for faster training')
     parser.add_argument('--weights', type=str, default='checkpoint/yolov4-tiny.weights', help='initial weights path')
-    parser.add_argument('--name', default='', help='renames results.txt to results_name.txt if supplied')
-    parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
-    parser.add_argument('--adam', action='store_true', help='use adam optimizer')
     opt = parser.parse_args()
     opt.n_class = 5
     opt.conf_threshold = 0.05  # object confidence threshold
@@ -195,7 +186,6 @@ if __name__ == "__main__":
     opt.min_size = 0
 
     device = 'cuda' if torch.cuda.is_available() == 1 else 'cpu'
-    # device = 'cpu'
 
     data = opt.data
     epochs = opt.epochs
@@ -203,7 +193,7 @@ if __name__ == "__main__":
 
     tb_writer = SummaryWriter()
 
-    init_seeds()  # eventuell raus lassen später?
+    init_seeds()
     data_dict = parse_data_cfg(data)
     train_path = data_dict['train']
     valid_path = data_dict['valid']
@@ -243,32 +233,33 @@ if __name__ == "__main__":
         model.load_state_dict(torch.load(opt.weights)['model'])
     model = model.to(device)
 
-    optimizer = optim.SGD(
-        model.parameters(),
-        lr=opt.lr,
-        momentum=0.9,
-        weight_decay=opt.l2,
-        nesterov=True,
-    )
-    # optimizer = optim.Adam(
+    # optimizer = optim.SGD(  # erster Durchgang
     #     model.parameters(),
-    #     # lr=opt.lr, # versuch mit default Werten
-    #     # weight_decay=opt.l2,
+    #     lr=opt.lr,
+    #     momentum=0.9,
+    #     weight_decay=opt.l2,
+    #     nesterov=True,
     # )
-    scheduler = optim.lr_scheduler.MultiStepLR(
-        optimizer, milestones=[16, 22], gamma=0.1
+    optimizer = optim.Adam(  # zweiter Durchgang
+        model.parameters(),
+        # Default Werte
     )
+    # scheduler = optim.lr_scheduler.MultiStepLR(
+    #     optimizer, milestones=[16, 22], gamma=0.1
+    # )
+
+    # testing
     if opt.test:
         epoch = 0
         valid(test_loader, None, model, device, test=True)
         sys.exit()
 
+    # training
     for epoch in range(opt.epochs):
         train(epoch, train_loader, model, optimizer, device)
         valid(valid_loader, valid_set, model, device)
 
-        scheduler.step()
-        # if get_rank() == 0:
+        # scheduler.step()
 
         torch.save(
             {'model': model.state_dict(), 'optim': optimizer.state_dict()},

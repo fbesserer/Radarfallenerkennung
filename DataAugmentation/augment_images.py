@@ -7,9 +7,6 @@ from tkinter.messagebox import askyesno
 import csv
 import concurrent.futures
 
-# INITDIR = "C:\\Users\\Fabian\\Documents\\MCSc\\Projekt\\Code\\Radarfallenerkennung"
-
-
 INITDIR = "F:\\RadarProjekt\\Training"
 DEBUG = False
 
@@ -267,3 +264,4 @@ if __name__ == "__main__":
     # delete_files(original_path)
     aug = Executor(original_path, save_path)
     aug.start_augmentation()
+    print("augmentation finished")

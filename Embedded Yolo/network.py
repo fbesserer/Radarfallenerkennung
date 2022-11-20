@@ -278,7 +278,7 @@ class EmbeddedYolo(nn.Module):
         self.inf_time_bb = 0
         self.inf_time_pp = 0
 
-    def forward(self, input, image_sizes=None, targets=None, detection=False):
+    def forward(self, input, image_sizes=None, targets=None, inference=False):
         t = time.perf_counter()
         features = self.backbone(input)
         self.inf_time_bb += time.perf_counter() - t
@@ -306,7 +306,7 @@ class EmbeddedYolo(nn.Module):
             )
             self.inf_time_pp += time.perf_counter() - t
             # print(f"time after postprocessor: {time.perf_counter() - t}")
-            if detection:
+            if inference:
                 return boxes, None
             # Test Loss für Metriken
             loss_cls, loss_box, loss_center = self.loss(
